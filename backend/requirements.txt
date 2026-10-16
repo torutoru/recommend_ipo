@@ -6,7 +6,5 @@ PyYAML==6.0.2
 httpx==0.27.2
 pytest==8.3.3
 tzdata==2024.2
-
-# Turso (운영=Render Linux 전용). sqlite3 호환 API.
-# Windows 는 네이티브 휠이 없어 설치 자체를 skip — 로컬은 로컬 SQLite 사용.
-libsql-experimental==0.0.49; sys_platform != "win32"
+# Turso: Hrana over HTTP (`/v2/pipeline`) 를 httpx 로 직접 호출 (어댑터는 `app/turso_adapter.py`).
+# → 별도 Turso 패키지 불필요 (libsql_experimental 은 Render 에서 영속성 실패로 제거함, 지시 #14)

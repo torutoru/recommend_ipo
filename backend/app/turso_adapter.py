@@ -1,40 +1,52 @@
-"""Turso(libSQL) 어댑터 — Render(Linux) 운영 전용. 로컬(Windows) 에서는 사용 안 됨.
+"""Turso 어댑터 — Hrana over HTTP (`/v2/pipeline`) 를 httpx 로 직접 호출.
 
-지연 import (`libsql_experimental`) 로 Windows 에서는 임포트 자체가 일어나지 않는다.
-`store.connect()` 가 `use_turso()` True 일 때만 이 모듈을 불러온다.
+지시 #14: libsql_experimental 은 Render 에서 영속성 실패(수집 SUCCEEDED 지만 /api/ipos 0건) →
+Turso HTTP API 로 전환. 각 요청이 명확히 서버에 도달하고, 응답에 `affected_row_count` 가 포함돼
+쓰기 성공 여부를 즉시 검증할 수 있다. 네이티브 의존성 없음, Windows·Linux 모두 동작.
 
-sqlite3 호환성 보완:
-- `libsql_experimental.connect()` 는 sqlite3-호환 Connection 반환.
-- row_factory 는 지원 안 될 수 있어 커서 결과를 dict-like 로 감싸는 `_RowAdapter` 를 둔다.
-- `PRAGMA foreign_keys = ON` 등은 지원된다(libSQL 가 SQLite 호환).
+sqlite3-호환 인터페이스:
+- `TursoConnection.execute(sql, params=())` → `_CursorAdapter`
+- `executemany(sql, seq)` → 단일 pipeline 요청으로 묶어 전송
+- `executescript(sql)` → `;` 로 분리해 pipeline 다중 statement
+- `commit()` / `close()` 는 **no-op** (각 요청 autocommit)
+- 결과 row 는 컬럼명 dict-like `_Row`
 
-**로그 금지**: TURSO_DATABASE_URL / TURSO_AUTH_TOKEN 값은 어디에도 출력하지 않는다.
+로그·에러 금지:
+- `TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN` 전체 값을 에러·로그에 노출하지 않는다.
 """
 from __future__ import annotations
 
+import base64
+import re
 from contextlib import contextmanager
-from typing import Any, Iterator
+from typing import Any, Iterator, Optional
+
+import httpx
 
 from .config import get_settings
 
 
 class TursoConnectError(RuntimeError):
-    """Turso 연결 실패 — fallback 없이 호출자에게 전파."""
+    """Turso 연결·요청 실패 — fallback 없이 호출자에게 전파."""
 
 
-def _import_libsql():
-    try:
-        import libsql_experimental as libsql
-    except ImportError as e:
-        raise TursoConnectError(
-            "libsql-experimental 패키지가 설치되지 않았습니다 "
-            "(Windows 에서는 설치되지 않습니다). 운영 환경에서 Turso 를 쓰려면 Linux(Render)에서 돌리세요."
-        ) from e
-    return libsql
+# ---------- URL ----------
+
+def _to_http_url(url: str) -> str:
+    """`libsql://host.turso.io` → `https://host.turso.io`.
+
+    `wss:` / `ws:` 도 http(s) 로 매핑. 이미 http(s) 이면 그대로.
+    """
+    if url.startswith("libsql://"):
+        return "https://" + url[len("libsql://"):]
+    if url.startswith("wss://"):
+        return "https://" + url[len("wss://"):]
+    if url.startswith("ws://"):
+        return "http://" + url[len("ws://"):]
+    return url
 
 
 def _mask(s: str) -> str:
-    """로그·에러 메시지 안에서 토큰·URL 끝을 가린다 (완전 노출 방지)."""
     if not s:
         return "<empty>"
     if len(s) <= 8:
@@ -42,14 +54,50 @@ def _mask(s: str) -> str:
     return f"{s[:4]}***{s[-2:]}"
 
 
+# ---------- 값 ↔ Turso typed value ----------
+
+def _to_arg(v: Any) -> dict:
+    if v is None:
+        return {"type": "null"}
+    if isinstance(v, bool):
+        # Turso 는 boolean 전용 타입 없음 — 0/1 integer 로
+        return {"type": "integer", "value": "1" if v else "0"}
+    if isinstance(v, int):
+        return {"type": "integer", "value": str(v)}
+    if isinstance(v, float):
+        return {"type": "float", "value": str(v)}
+    if isinstance(v, (bytes, bytearray)):
+        return {"type": "blob", "base64": base64.b64encode(bytes(v)).decode("ascii")}
+    # str 또는 그 외 → text
+    return {"type": "text", "value": str(v)}
+
+
+def _from_value(v: dict) -> Any:
+    """Turso 응답의 typed value → Python 원시값."""
+    t = v.get("type")
+    if t == "null":
+        return None
+    val = v.get("value")
+    if t == "integer":
+        return int(val)
+    if t == "float":
+        return float(val)
+    if t == "text":
+        return val
+    if t == "blob":
+        return base64.b64decode(v.get("base64", ""))
+    return val
+
+
+# ---------- Row (sqlite3.Row 호환) ----------
+
 class _Row:
-    """sqlite3.Row 모양을 흉내 — 컬럼명으로 접근 + keys()."""
     __slots__ = ("_data",)
 
     def __init__(self, data: dict[str, Any]) -> None:
         self._data = data
 
-    def __getitem__(self, key: str | int) -> Any:
+    def __getitem__(self, key):
         if isinstance(key, int):
             return list(self._data.values())[key]
         return self._data[key]
@@ -58,44 +106,126 @@ class _Row:
         return self._data.keys()
 
 
-class TursoConnection:
-    """`sqlite3.Connection` 과 유사한 인터페이스를 노출하는 얇은 래퍼.
+# ---------- HTTP 호출 ----------
 
-    store.py 가 사용하는 기능만 지원:
-      - execute(sql, params=()) → cursor
-      - executemany(sql, seq_of_params)
-      - executescript(sql_script)  — SQL 을 ';' 기준으로 분리해 순차 실행
-      - commit() / close()
-      - 컨텍스트 매니저
-      - 결과 row → dict-like (_Row)
+def _post_pipeline(client: httpx.Client, base_url: str, token: str, statements: list[dict]) -> list[dict]:
+    """pipeline 요청 → results 리스트 반환.
+
+    statements: `[{"sql": "...", "args": [...]}, ...]`
+    results[i]: `{"cols": [...], "rows": [[...]], "affected_row_count": N, "last_insert_rowid": X}`
     """
+    requests = [{"type": "execute", "stmt": s} for s in statements]
+    requests.append({"type": "close"})
+    body = {"requests": requests}
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    try:
+        r = client.post(f"{base_url}/v2/pipeline", headers=headers, json=body, timeout=30.0)
+    except httpx.HTTPError as e:
+        raise TursoConnectError(
+            f"Turso HTTP 요청 실패 (url={_mask(base_url)}) — {type(e).__name__}"
+        ) from None
+    if r.status_code != 200:
+        # 응답 body 에 토큰이 그대로 들어 있을 가능성은 낮지만, 본문도 노출하지 않는다
+        raise TursoConnectError(
+            f"Turso HTTP {r.status_code} (url={_mask(base_url)})"
+        )
+    payload = r.json()
+    results = payload.get("results", [])
+    out: list[dict] = []
+    for i, item in enumerate(results[: len(statements)]):
+        if item.get("type") == "error":
+            err = item.get("error", {})
+            msg = err.get("message", "unknown")
+            raise TursoConnectError(f"Turso SQL 에러 (stmt #{i}): {msg[:200]}")
+        resp = item.get("response", {})
+        out.append(resp.get("result", {}))
+    return out
 
-    def __init__(self, inner):
-        self._conn = inner
 
-    # ---- cursor ----
-    def execute(self, sql: str, params: tuple | list | None = None):
-        cur = self._conn.cursor()
-        cur.execute(sql, params or ())
-        return _CursorAdapter(cur)
+# ---------- Cursor / Connection ----------
 
-    def executemany(self, sql: str, seq):
-        cur = self._conn.cursor()
-        cur.executemany(sql, list(seq))
-        return _CursorAdapter(cur)
+class _CursorAdapter:
+    """Turso HTTP 결과 1건을 sqlite3-cursor 처럼 노출."""
 
-    def executescript(self, script: str):
-        # libsql_experimental 은 multi-statement 를 한 execute 로 못 받을 수 있어 분리 실행.
-        for stmt in _split_sql(script):
-            if stmt:
-                self._conn.cursor().execute(stmt)
+    def __init__(self, result: dict):
+        self._result = result or {}
+        self._rows_raw = self._result.get("rows", []) or []
+        self._cols = [c.get("name") for c in self._result.get("cols", [])]
+        self._pos = 0
+        self.lastrowid = _parse_lastrowid(self._result)
+
+    def fetchone(self) -> Optional[_Row]:
+        if self._pos >= len(self._rows_raw):
+            return None
+        row = self._rows_raw[self._pos]
+        self._pos += 1
+        return self._wrap(row)
+
+    def fetchall(self) -> list[_Row]:
+        out = [self._wrap(r) for r in self._rows_raw[self._pos:]]
+        self._pos = len(self._rows_raw)
+        return out
+
+    def __iter__(self):
+        return iter(self.fetchall())
+
+    def _wrap(self, row_values: list[dict]) -> _Row:
+        if not self._cols:
+            raise RuntimeError(
+                "Turso 응답에 cols 가 비어 있어 row 를 dict 로 감쌀 수 없습니다 "
+                "(non-SELECT 결과를 fetch 하려는 호출 패턴일 수 있음)."
+            )
+        parsed = [_from_value(v) if isinstance(v, dict) else v for v in row_values]
+        return _Row(dict(zip(self._cols, parsed)))
+
+
+def _parse_lastrowid(result: dict) -> Optional[int]:
+    v = result.get("last_insert_rowid")
+    if v is None:
+        return None
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+
+class TursoConnection:
+    """HTTP 기반 커넥션 — context 안에서 사용. autocommit 전제."""
+
+    def __init__(self, client: httpx.Client, base_url: str, token: str):
+        self._client = client
+        self._base_url = base_url
+        self._token = token
+
+    # ---- 공개 API ----
+    def execute(self, sql: str, params: Optional[tuple | list] = None) -> _CursorAdapter:
+        stmt = {"sql": sql}
+        if params is not None:
+            stmt["args"] = [_to_arg(p) for p in params]
+        results = _post_pipeline(self._client, self._base_url, self._token, [stmt])
+        return _CursorAdapter(results[0] if results else {})
+
+    def executemany(self, sql: str, seq_of_params) -> _CursorAdapter:
+        stmts = [{"sql": sql, "args": [_to_arg(p) for p in params]} for params in seq_of_params]
+        if not stmts:
+            return _CursorAdapter({})
+        results = _post_pipeline(self._client, self._base_url, self._token, stmts)
+        # 마지막 결과만 반환 (lastrowid 는 마지막 insert 기준)
+        return _CursorAdapter(results[-1])
+
+    def executescript(self, script: str) -> None:
+        stmts = [{"sql": s} for s in _split_sql(script) if s]
+        if not stmts:
+            return
+        _post_pipeline(self._client, self._base_url, self._token, stmts)
 
     def commit(self) -> None:
-        self._conn.commit()
+        # Turso HTTP 는 각 요청 autocommit — 명시 commit 불필요
+        pass
 
     def close(self) -> None:
         try:
-            self._conn.close()
+            self._client.close()
         except Exception:
             pass
 
@@ -104,100 +234,30 @@ class TursoConnection:
         return self
 
     def __exit__(self, exc_type, exc, tb):
-        if exc_type is None:
-            self.commit()
         self.close()
         return False
 
 
-class _CursorAdapter:
-    """libsql cursor → sqlite3-style(Row 반환).
-
-    주의 (지시 #13 fix):
-    - libsql_experimental 커서는 Python 이터레이터 프로토콜(__iter__/__next__) 지원이 **보장되지 않는다**.
-      → `__iter__` 를 `self.fetchall()` 로 구현(한 번에 모두 가져온 뒤 순회).
-    - description 이 None 이면 컬럼명 없이 dict 로 감쌀 수 없다. raw tuple 반환은 금지(pm 지시).
-      → 명시 RuntimeError. non-SELECT 쿼리는 fetchone/fetchall 호출 자체를 피하는 패턴이어야 함.
-    """
-
-    def __init__(self, cursor):
-        self._cur = cursor
-
-    def fetchone(self):
-        row = self._cur.fetchone()
-        return self._wrap(row)
-
-    def fetchall(self):
-        return [self._wrap(r) for r in self._cur.fetchall()]
-
-    def __iter__(self):
-        # libsql cursor 가 iterable 아닐 수 있으니 fetchall 기반.
-        return iter(self.fetchall())
-
-    @property
-    def lastrowid(self):
-        return self._cur.lastrowid
-
-    def _wrap(self, row):
-        if row is None:
-            return None
-        desc = getattr(self._cur, "description", None) or []
-        cols = [d[0] for d in desc]
-        if not cols:
-            raise RuntimeError(
-                "Turso 커서에 description 이 없어 row 를 dict 로 감쌀 수 없습니다 "
-                "(non-SELECT 결과를 fetch 하려는 호출 패턴일 수 있음)."
-            )
-        return _Row(dict(zip(cols, row)))
-
-
 def _split_sql(script: str) -> list[str]:
-    """세미콜론 기준 statement 분리 (주석·문자열 안의 ; 는 단순 처리로는 오탐 가능하지만,
-    현재 schema 는 그런 케이스 없음)."""
-    out = []
-    buf = []
-    for ch in script:
-        buf.append(ch)
-        if ch == ";":
-            s = "".join(buf).strip()
-            if s:
-                out.append(s)
-            buf = []
-    tail = "".join(buf).strip()
-    if tail:
-        out.append(tail)
-    return out
+    """세미콜론 기준 분리 (단순 — 현재 SCHEMA 는 문자열·주석 안에 ; 없음)."""
+    parts = [p.strip().rstrip(";").strip() for p in script.split(";")]
+    return [p + ";" for p in parts if p]
 
 
 @contextmanager
 def connect_turso() -> Iterator[TursoConnection]:
-    """TURSO_DATABASE_URL / TURSO_AUTH_TOKEN 설정 상태를 전제로 Turso 커넥션을 연다.
-
-    실패 시 **fallback 없이** `TursoConnectError` 를 던진다 (pm 요구).
-    """
+    """Turso HTTP 커넥션 (autocommit). 실패 시 TursoConnectError, fallback 없음."""
     s = get_settings()
     url = s.turso_database_url
     token = s.turso_auth_token
     if not url or not token:
         raise TursoConnectError(
-            "TURSO_DATABASE_URL/TURSO_AUTH_TOKEN 가 비어 있습니다 — connect_turso() 호출 전 use_turso() 로 확인하세요."
+            "TURSO_DATABASE_URL/TURSO_AUTH_TOKEN 가 비어 있습니다 — connect_turso() 호출 전 use_turso() 확인."
         )
-    libsql = _import_libsql()
-    try:
-        inner = libsql.connect(url, auth_token=token)
-    except Exception as e:
-        # 메시지 안에 전체 토큰·URL 가 들어가지 않도록 마스킹
-        raise TursoConnectError(
-            f"Turso 연결 실패 (url={_mask(url)}) — 원인: {type(e).__name__}"
-        ) from None
-    # FK 활성화 (SQLite 호환)
-    try:
-        inner.cursor().execute("PRAGMA foreign_keys = ON")
-    except Exception:
-        pass
-    conn = TursoConnection(inner)
+    base = _to_http_url(url)
+    client = httpx.Client()
+    conn = TursoConnection(client, base, token)
     try:
         yield conn
-        conn.commit()
     finally:
         conn.close()

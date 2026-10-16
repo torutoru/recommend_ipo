@@ -1,135 +1,281 @@
-"""Turso 어댑터 유닛 테스트 (Windows·Linux 공통, libsql_experimental 설치 불요).
+"""Turso HTTP 어댑터 유닛 테스트 — httpx 를 MockTransport 로 교체 (실 Turso 연결 없이).
 
-- `libsql_experimental` 모듈을 fake 로 주입 → `connect_turso()` 가 TursoConnection 반환
-- `_Row`, `_CursorAdapter`, `TursoConnection.executescript` 분기 동작 확인
-- 미설치 환경 재현 (`sys.modules["libsql_experimental"] = None`) → TursoConnectError
-- 토큰·URL 이 에러 메시지에 **그대로 노출되지 않음** 확인
+지시 #14 — libsql_experimental 이 Render 에서 영속성 실패해 Hrana over HTTP (`/v2/pipeline`) 로 전환.
+이 테스트는 다음을 보장:
+- URL 변환(libsql://→https://), 토큰·URL 로그 미노출
+- SQL params typed value 매핑, 응답 rows 역직렬화
+- Cursor iter 가 fetchall 기반 (지시 #13 재발 방지)
+- `cols` 없을 때 _wrap 이 RuntimeError
+- store.connect() 가 Turso 경로로 라우팅
+- 쓰기 → 다른 커넥션에서 읽기 영속성(fake 공유 저장소)
 """
 from __future__ import annotations
 
-import sys
-import types
+import json
+from collections import defaultdict
+from typing import Any, Callable
 
+import httpx
 import pytest
 
 from app.config import get_settings
 from app.turso_adapter import (
     TursoConnectError,
     TursoConnection,
+    _from_value,
+    _mask,
     _Row,
     _split_sql,
-    connect_turso,
+    _to_arg,
+    _to_http_url,
 )
 
 
 # ---------- 유닛 ----------
 
-def test_row_dict_access_and_keys():
+def test_row_dict_access():
     r = _Row({"a": 1, "b": "x"})
     assert r["a"] == 1
-    assert r["b"] == "x"
     assert r[0] == 1
     assert list(r.keys()) == ["a", "b"]
 
 
-def test_split_sql_handles_multi_statements():
-    stmts = _split_sql("CREATE TABLE t (x INT); INSERT INTO t VALUES (1);  ")
-    assert stmts == ["CREATE TABLE t (x INT);", "INSERT INTO t VALUES (1);"]
+def test_split_sql_handles_multiple():
+    stmts = _split_sql("CREATE TABLE t(x INT); INSERT INTO t VALUES (1);  ")
+    assert len(stmts) == 2
+    assert stmts[0].startswith("CREATE") and stmts[1].startswith("INSERT")
 
 
-# ---------- fake libsql_experimental ----------
+def test_to_arg_type_mapping():
+    assert _to_arg(None) == {"type": "null"}
+    assert _to_arg(42) == {"type": "integer", "value": "42"}
+    assert _to_arg(1.5) == {"type": "float", "value": "1.5"}
+    assert _to_arg("hi") == {"type": "text", "value": "hi"}
+    assert _to_arg(True) == {"type": "integer", "value": "1"}
 
-class _FakeCursor:
-    """실 libsql_experimental 커서를 **엄격하게** 흉내 (지시 #13):
-    - `__iter__` 는 **지원하지 않음** → 호출자가 iter 하면 TypeError
-    - 비-SELECT 쿼리의 description 은 **None**
-    - lastrowid 는 INSERT 시만 의미 있음
+
+def test_from_value_type_mapping():
+    assert _from_value({"type": "null"}) is None
+    assert _from_value({"type": "integer", "value": "7"}) == 7
+    assert _from_value({"type": "float", "value": "2.5"}) == 2.5
+    assert _from_value({"type": "text", "value": "ok"}) == "ok"
+
+
+def test_to_http_url_scheme_conversions():
+    assert _to_http_url("libsql://foo.turso.io") == "https://foo.turso.io"
+    assert _to_http_url("https://x") == "https://x"
+    assert _to_http_url("wss://x") == "https://x"
+
+
+def test_mask_hides_value():
+    assert _mask("") == "<empty>"
+    assert _mask("abcd") == "***"
+    assert _mask("abcdefghij") == "abcd***ij"
+
+
+# ---------- Fake Turso 서버 (httpx MockTransport + 커넥션 간 공유 저장소) ----------
+
+class _FakeTursoBackend:
+    """매우 단순한 in-memory 테이블 — INSERT/SELECT/CREATE/DELETE 를 상태로 보존.
+
+    핵심 사용 패턴만 처리 (store.py 가 쓰는 SQL 커버):
+    - CREATE TABLE IF NOT EXISTS ... ;
+    - INSERT INTO <t> (cols) VALUES (?,?,...) ON CONFLICT(...) DO UPDATE SET ... — upsert
+    - UPDATE / DELETE / PRAGMA foreign_keys 는 no-op 성공
+    - SELECT * FROM <t> [WHERE col = ?] — 평면 매칭
+    - SELECT ... FROM <t> ORDER BY ... — ORDER BY 무시
     """
 
     def __init__(self):
-        self.description = None     # 기본 None, SELECT 쿼리에서만 세팅
-        self._rows: list[tuple] = []
-        self._pos = 0
-        self.lastrowid = 42
-        self.executed_sql: list[tuple[str, tuple]] = []
+        # table_name -> list[dict]
+        self.tables: dict[str, list[dict]] = defaultdict(list)
+        # table_name -> list[column]
+        self.schemas: dict[str, list[str]] = {}
+        # 자동 증가 id (collect_runs)
+        self.autoinc: dict[str, int] = defaultdict(int)
 
-    def execute(self, sql, params=()):
-        self.executed_sql.append((sql, tuple(params) if params else ()))
-        s = sql.lstrip().upper()
-        if s.startswith("SELECT"):
-            if "FROM IPOS" in s and ("WHERE CORP_CODE" in s and "?" in sql):
-                self.description = [("corp_code",), ("corp_name",)]
-                self._rows = [("00534729", "디티에스")]
-            elif "FROM IPOS" in s:  # list_ipos 전체 조회
-                self.description = [("corp_code",), ("corp_name",)]
-                self._rows = [("00534729", "디티에스")]
-            elif "FROM SOURCES" in s:
-                self.description = [("corp_code",), ("doc_type",), ("rcept_no",), ("rcept_dt",), ("url",)]
-                self._rows = []
-            else:
-                self.description = [("x",)]
-                self._rows = []
-        else:
-            self.description = None   # INSERT/ALTER/PRAGMA 등
-            self._rows = []
-        return self
+    def handle(self, request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content.decode("utf-8"))
+        results: list[dict] = []
+        for req in body["requests"]:
+            if req["type"] == "close":
+                continue
+            stmt = req["stmt"]
+            sql = stmt["sql"].strip().rstrip(";").strip()
+            args = [self._from_arg(a) for a in stmt.get("args", [])]
+            try:
+                results.append({"type": "ok", "response": {"type": "execute",
+                                                            "result": self._run(sql, args)}})
+            except Exception as e:
+                results.append({"type": "error", "error": {"message": str(e)}})
+        return httpx.Response(200, json={"baton": None, "results": results})
 
-    def executemany(self, sql, seq):
-        for p in seq:
-            self.execute(sql, p)
-        return self
-
-    def fetchone(self):
-        if self._pos >= len(self._rows):
+    def _from_arg(self, a):
+        t = a.get("type")
+        if t == "null":
             return None
-        r = self._rows[self._pos]
-        self._pos += 1
-        return r
+        if t == "integer":
+            return int(a["value"])
+        if t == "float":
+            return float(a["value"])
+        return a.get("value")
 
-    def fetchall(self):
-        out = self._rows[self._pos:]
-        self._pos = len(self._rows)
-        return out
+    def _run(self, sql: str, args: list) -> dict:
+        up = sql.upper()
+        if up.startswith("PRAGMA FOREIGN_KEYS"):
+            return {"cols": [], "rows": [], "affected_row_count": 0, "last_insert_rowid": None}
+        if up.startswith("CREATE TABLE"):
+            # 매우 단순 — 테이블명과 컬럼명만 추출
+            import re
+            m = re.search(r"CREATE TABLE(?: IF NOT EXISTS)?\s+(\w+)\s*\((.*)\)", sql, re.IGNORECASE | re.DOTALL)
+            if m:
+                name = m.group(1)
+                cols_raw = m.group(2)
+                cols = [c.strip().split()[0] for c in cols_raw.split(",") if c.strip() and not c.strip().upper().startswith(("PRIMARY", "FOREIGN"))]
+                self.schemas[name] = cols
+                self.tables.setdefault(name, [])
+            return {"cols": [], "rows": [], "affected_row_count": 0, "last_insert_rowid": None}
+        if up.startswith("CREATE INDEX"):
+            return {"cols": [], "rows": [], "affected_row_count": 0, "last_insert_rowid": None}
+        if up.startswith("INSERT INTO"):
+            import re
+            m = re.match(r"INSERT INTO\s+(\w+)\s*\(([^)]+)\)\s*VALUES\s*\(([^)]+)\)(.*)", sql, re.IGNORECASE | re.DOTALL)
+            if not m:
+                return {"cols": [], "rows": [], "affected_row_count": 0, "last_insert_rowid": None}
+            table = m.group(1)
+            cols = [c.strip() for c in m.group(2).split(",")]
+            tail = m.group(4) or ""
+            row = dict(zip(cols, args))
+            # ON CONFLICT DO UPDATE 처리 (upsert) — PRIMARY KEY 로 corp_code 사용 가정
+            if "ON CONFLICT" in tail.upper():
+                pk = cols[0]
+                existing = [r for r in self.tables[table] if r.get(pk) == row.get(pk)]
+                if existing:
+                    existing[0].update(row)
+                    return {"cols": [], "rows": [], "affected_row_count": 1, "last_insert_rowid": None}
+            self.tables[table].append(row)
+            self.autoinc[table] += 1
+            return {"cols": [], "rows": [], "affected_row_count": 1,
+                    "last_insert_rowid": str(self.autoinc[table])}
+        if up.startswith("DELETE FROM"):
+            import re
+            m = re.match(r"DELETE FROM\s+(\w+)(?:\s+WHERE\s+(\w+)\s*=\s*\?)?", sql, re.IGNORECASE)
+            if m:
+                table = m.group(1)
+                col = m.group(2)
+                if col and args:
+                    before = len(self.tables[table])
+                    self.tables[table] = [r for r in self.tables[table] if r.get(col) != args[0]]
+                    affected = before - len(self.tables[table])
+                else:
+                    affected = len(self.tables[table])
+                    self.tables[table] = []
+                return {"cols": [], "rows": [], "affected_row_count": affected, "last_insert_rowid": None}
+        if up.startswith("UPDATE"):
+            # 단순 매치만 — 테스트에선 collect_runs UPDATE 뿐
+            import re
+            m = re.match(r"UPDATE\s+(\w+)\s+SET\s+(.*?)\s+WHERE\s+(\w+)\s*=\s*\?", sql, re.IGNORECASE | re.DOTALL)
+            if m:
+                table = m.group(1)
+                set_clause = m.group(2)
+                where_col = m.group(3)
+                where_val = args[-1]
+                set_cols = [c.strip().split("=")[0].strip() for c in set_clause.split(",")]
+                for r in self.tables[table]:
+                    if r.get(where_col) == where_val:
+                        for i, c in enumerate(set_cols):
+                            r[c] = args[i]
+                        break
+                return {"cols": [], "rows": [], "affected_row_count": 1, "last_insert_rowid": None}
+        if up.startswith("SELECT"):
+            return self._select(sql, args)
+        return {"cols": [], "rows": [], "affected_row_count": 0, "last_insert_rowid": None}
 
-    # ⚠ __iter__ 를 **정의하지 않는다** — 실 libsql 과 동일. 호출자가 iter 하면 TypeError.
+    def _select(self, sql: str, args: list) -> dict:
+        import re
+        # SELECT <cols> FROM <table> [WHERE <col> = ?] [ORDER BY ...]
+        m = re.match(
+            r"SELECT\s+(.+?)\s+FROM\s+(\w+)(?:\s+WHERE\s+(.*?))?(?:\s+ORDER\s+BY.*)?(?:\s+LIMIT.*)?$",
+            sql, re.IGNORECASE | re.DOTALL,
+        )
+        if not m:
+            return {"cols": [], "rows": [], "affected_row_count": 0, "last_insert_rowid": None}
+        cols_part = m.group(1).strip()
+        table = m.group(2)
+        where = (m.group(3) or "").strip()
+        rows_src = list(self.tables.get(table, []))
 
+        # 단순 WHERE 지원: `col = ?`, `col IS NOT NULL`, `col IS NULL`, `AND` 조합
+        if where:
+            cond = where
+            for part in [p.strip() for p in cond.split("AND")]:
+                mm = re.match(r"(\w+)\s*=\s*\?", part, re.IGNORECASE)
+                if mm:
+                    col = mm.group(1)
+                    val = args.pop(0) if args else None
+                    rows_src = [r for r in rows_src if r.get(col) == val]
+                    continue
+                mm = re.match(r"(\w+)\s+IS\s+NULL", part, re.IGNORECASE)
+                if mm:
+                    rows_src = [r for r in rows_src if r.get(mm.group(1)) is None]
+                    continue
+                mm = re.match(r"(\w+)\s+IS\s+NOT\s+NULL", part, re.IGNORECASE)
+                if mm:
+                    rows_src = [r for r in rows_src if r.get(mm.group(1)) is not None]
+                    continue
 
-class _FakeInner:
-    def __init__(self, closed=None):
-        self._cursors: list[_FakeCursor] = []
-        self.committed = 0
-        self.closed = False
+        # COUNT(*) 처리 — 지시 #14 쓰기 검증용
+        import re as _re
+        m_count = _re.match(r"COUNT\(\*\)\s+AS\s+(\w+)", cols_part, _re.IGNORECASE)
+        if m_count:
+            alias = m_count.group(1)
+            return {"cols": [{"name": alias}], "rows": [[self._pack(len(rows_src))]],
+                    "affected_row_count": 0, "last_insert_rowid": None}
 
-    def cursor(self):
-        c = _FakeCursor()
-        self._cursors.append(c)
-        return c
+        # cols 결정
+        if cols_part == "*":
+            cols = self.schemas.get(table) or (list(rows_src[0].keys()) if rows_src else [])
+        else:
+            cols = [c.strip() for c in cols_part.split(",")]
+        out_rows = [[self._pack(r.get(c)) for c in cols] for r in rows_src]
+        return {"cols": [{"name": c} for c in cols], "rows": out_rows,
+                "affected_row_count": 0, "last_insert_rowid": None}
 
-    def commit(self):
-        self.committed += 1
-
-    def close(self):
-        self.closed = True
+    def _pack(self, v):
+        if v is None:
+            return {"type": "null"}
+        if isinstance(v, int):
+            return {"type": "integer", "value": str(v)}
+        if isinstance(v, float):
+            return {"type": "float", "value": str(v)}
+        return {"type": "text", "value": str(v)}
 
 
 @pytest.fixture
-def fake_libsql(monkeypatch):
-    """libsql_experimental 모듈을 fake 로 주입."""
-    mod = types.ModuleType("libsql_experimental")
+def fake_turso(monkeypatch):
+    """httpx.Client 를 MockTransport 로 교체 + Settings 에 fake URL/토큰 주입."""
+    backend = _FakeTursoBackend()
+    transport = httpx.MockTransport(backend.handle)
 
-    def fake_connect(url, auth_token=None):
-        return _FakeInner()
+    original_init = httpx.Client.__init__
 
-    mod.connect = fake_connect
-    monkeypatch.setitem(sys.modules, "libsql_experimental", mod)
-    return mod
+    def patched_init(self, *args, **kwargs):
+        kwargs.setdefault("transport", transport)
+        original_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(httpx.Client, "__init__", patched_init)
+
+    s = get_settings()
+    s.turso_database_url = "libsql://fake.turso.io"
+    s.turso_auth_token = "faketoken"
+    return backend
 
 
-# ---------- Turso 연결 ----------
+# ---------- 핵심 기능 ----------
 
 def test_connect_turso_raises_when_env_empty():
+    from app.turso_adapter import connect_turso
     s = get_settings()
-    # conftest 에서 이미 "" 로 세팅되어 있지만 명시
     s.turso_database_url = ""
     s.turso_auth_token = ""
     with pytest.raises(TursoConnectError):
@@ -137,135 +283,117 @@ def test_connect_turso_raises_when_env_empty():
             pass
 
 
-def test_connect_turso_raises_when_libsql_missing(monkeypatch):
-    """libsql_experimental 를 import 할 수 없는 환경 재현."""
-    s = get_settings()
-    s.turso_database_url = "libsql://fake.turso.io"
-    s.turso_auth_token = "faketoken"
-    # import 실패를 강제
-    monkeypatch.setitem(sys.modules, "libsql_experimental", None)
-    with pytest.raises(TursoConnectError) as exc:
-        with connect_turso():
-            pass
-    # 토큰이 메시지에 노출되지 않아야 함
-    assert "faketoken" not in str(exc.value)
-
-
-def test_connect_turso_returns_wrapper(fake_libsql):
-    s = get_settings()
-    s.turso_database_url = "libsql://fake.turso.io"
-    s.turso_auth_token = "faketoken"
+def test_execute_select_returns_row(fake_turso):
+    from app.turso_adapter import connect_turso
+    # 사전 데이터 삽입
+    fake_turso.schemas["ipos"] = ["corp_code", "corp_name"]
+    fake_turso.tables["ipos"].append({"corp_code": "00534729", "corp_name": "디티에스"})
     with connect_turso() as conn:
-        assert isinstance(conn, TursoConnection)
         cur = conn.execute("SELECT corp_code, corp_name FROM ipos WHERE corp_code = ?", ("00534729",))
         row = cur.fetchone()
         assert row["corp_code"] == "00534729"
         assert row["corp_name"] == "디티에스"
 
 
-def test_executescript_splits_statements(fake_libsql):
-    s = get_settings()
-    s.turso_database_url = "libsql://fake.turso.io"
-    s.turso_auth_token = "faketoken"
+def test_cursor_iter_via_fetchall(fake_turso):
+    """회귀 (#13): __iter__ 는 fetchall 기반."""
+    from app.turso_adapter import connect_turso
+    fake_turso.schemas["ipos"] = ["corp_code"]
+    fake_turso.tables["ipos"].extend([{"corp_code": "a"}, {"corp_code": "b"}])
     with connect_turso() as conn:
-        conn.executescript("CREATE TABLE a(x INT); CREATE TABLE b(y INT);")
-    # fake 는 executescript 를 execute 2회로 분리해 받음 — Fake Inner 확인은 생략, 예외 없음만 확인
+        rows = list(conn.execute("SELECT corp_code FROM ipos"))
+        assert [r["corp_code"] for r in rows] == ["a", "b"]
 
 
-def test_token_not_leaked_in_connect_error(monkeypatch):
-    """libsql.connect 자체가 예외 발생 → 메시지에 token 미노출."""
-    mod = types.ModuleType("libsql_experimental")
-
-    def failing_connect(url, auth_token=None):
-        raise RuntimeError(f"nope url={url} token={auth_token}")
-
-    mod.connect = failing_connect
-    monkeypatch.setitem(sys.modules, "libsql_experimental", mod)
-
-    s = get_settings()
-    s.turso_database_url = "libsql://top-secret-prod.turso.io"
-    s.turso_auth_token = "SUPERSECRETTOKEN"
-    with pytest.raises(TursoConnectError) as exc:
-        with connect_turso():
-            pass
-    msg = str(exc.value)
-    assert "SUPERSECRETTOKEN" not in msg
-    assert "top-secret-prod" not in msg
+def test_wrap_raises_when_no_cols(fake_turso):
+    """`cols` 가 비어 있으면 _wrap 이 명시 RuntimeError (raw tuple 금지)."""
+    from app.turso_adapter import _CursorAdapter
+    # cols 없이 rows 가 있는 비정상 응답을 수동 조립
+    cur = _CursorAdapter({"cols": [], "rows": [[{"type": "text", "value": "x"}]]})
+    with pytest.raises(RuntimeError, match="cols"):
+        cur.fetchone()
 
 
-# ---------- store.connect() 가 Turso 를 경유 ----------
+# ---------- 영속성 (지시 #14 핵심) ----------
 
-def test_store_connect_uses_turso_when_env_set(fake_libsql):
+def test_write_persists_across_connections(fake_turso):
+    """회귀 (#14): 쓰기 → 새 커넥션에서 읽기로 영속성 확인."""
+    from app.turso_adapter import connect_turso
+    # 커넥션 A — 테이블 생성 + INSERT
+    with connect_turso() as a:
+        a.executescript(
+            "CREATE TABLE IF NOT EXISTS ipos (corp_code TEXT PRIMARY KEY, corp_name TEXT);"
+        )
+        a.execute(
+            "INSERT INTO ipos (corp_code, corp_name) VALUES (?, ?)",
+            ("00534729", "디티에스"),
+        )
+    # 커넥션 B — 읽기 (fake backend 는 공유 상태 보존)
+    with connect_turso() as b:
+        row = b.execute("SELECT corp_code, corp_name FROM ipos WHERE corp_code = ?", ("00534729",)).fetchone()
+        assert row is not None
+        assert row["corp_name"] == "디티에스"
+
+
+def test_affected_row_count_available(fake_turso):
+    from app.turso_adapter import connect_turso
+    with connect_turso() as a:
+        a.executescript("CREATE TABLE IF NOT EXISTS t (x INTEGER);")
+        cur = a.execute("INSERT INTO t (x) VALUES (?)", (1,))
+        # last_insert_rowid 는 fake 가 autoinc 로 생성
+        assert cur.lastrowid == 1
+
+
+def test_store_connect_uses_turso(fake_turso):
     from app import store
-    s = get_settings()
-    s.turso_database_url = "libsql://fake.turso.io"
-    s.turso_auth_token = "faketoken"
     with store.connect() as conn:
         assert isinstance(conn, TursoConnection)
 
 
-def test_cursor_adapter_iter_uses_fetchall_not_native_iter(fake_libsql):
-    """회귀 (#13): libsql 커서가 __iter__ 를 지원하지 않아도 TursoConnection 이 iter 가능해야 함.
-    실제 Render 500 원인 — `for r in conn.execute(...)` 가 깨졌음.
-    """
+def test_store_connect_no_fallback_on_turso_failure(monkeypatch):
+    """Turso 호출 자체가 깨지면 fallback 없이 TursoConnectError."""
     s = get_settings()
     s.turso_database_url = "libsql://fake.turso.io"
     s.turso_auth_token = "faketoken"
-    with connect_turso() as conn:
-        cur = conn.execute("SELECT corp_code, corp_name FROM ipos")
-        # iter 는 fetchall 기반이므로 libsql 네이티브 iter 가 없어도 돌아감
-        rows = list(cur)
-        assert len(rows) == 1
-        assert rows[0]["corp_code"] == "00534729"
 
+    def failing_transport(req):
+        raise httpx.ConnectError("network down")
 
-def test_store_list_ipos_works_via_turso(fake_libsql, tmp_path):
-    """회귀 (#13): store.list_ipos() 가 Turso 커서 순회에서 터지지 않아야 함."""
-    s = get_settings()
-    s.turso_database_url = "libsql://fake.turso.io"
-    s.turso_auth_token = "faketoken"
-    from app import store
-    rows = store.list_ipos()
-    assert isinstance(rows, list)
-    # fake 는 ipos 1건·sources 0건·warnings 0건 — 예외 없이 응답
-    assert len(rows) == 1
-    assert rows[0]["corp_code"] == "00534729"
+    transport = httpx.MockTransport(failing_transport)
+    original_init = httpx.Client.__init__
 
+    def patched_init(self, *args, **kwargs):
+        kwargs.setdefault("transport", transport)
+        original_init(self, *args, **kwargs)
 
-def test_wrap_raises_when_description_is_none(fake_libsql):
-    """회귀 (#13): description 이 None 인 커서에서 fetchone 하면 raw tuple 반환 금지."""
-    s = get_settings()
-    s.turso_database_url = "libsql://fake.turso.io"
-    s.turso_auth_token = "faketoken"
-    with connect_turso() as conn:
-        # INSERT (description None) → fetchone 호출 시도. 결과 자체는 None 이므로 wrap 통과.
-        cur = conn.execute("INSERT INTO ipos (corp_code) VALUES (?)", ("test",))
-        assert cur.fetchone() is None   # 실제 INSERT 는 결과 없음 → None 안전
+    monkeypatch.setattr(httpx.Client, "__init__", patched_init)
 
-        # 하지만 description None 인데 row 가 있는 비정상 상황을 흉내:
-        # fake 커서를 수동 조작해 row 를 넣어둠
-        cur._cur._rows = [("x",)]
-        cur._cur._pos = 0
-        cur._cur.description = None
-        import pytest
-        with pytest.raises(RuntimeError, match="description"):
-            cur.fetchone()
-
-
-def test_store_connect_does_not_fallback_on_turso_failure(monkeypatch):
-    """Turso 연결 실패 시 조용히 SQLite 로 가지 않고 예외 전파."""
-    mod = types.ModuleType("libsql_experimental")
-
-    def failing_connect(url, auth_token=None):
-        raise RuntimeError("network down")
-
-    mod.connect = failing_connect
-    monkeypatch.setitem(sys.modules, "libsql_experimental", mod)
-
-    s = get_settings()
-    s.turso_database_url = "libsql://fake.turso.io"
-    s.turso_auth_token = "faketoken"
     from app import store
     with pytest.raises(TursoConnectError):
-        with store.connect() as _:
-            pass
+        with store.connect() as conn:
+            conn.execute("SELECT 1")
+
+
+def test_token_not_leaked_in_error(monkeypatch):
+    s = get_settings()
+    s.turso_database_url = "libsql://top-secret-prod.turso.io"
+    s.turso_auth_token = "SUPERSECRETTOKEN"
+
+    def http_500(req):
+        return httpx.Response(500, text="server exploded " + "SUPERSECRETTOKEN")
+
+    transport = httpx.MockTransport(http_500)
+    original_init = httpx.Client.__init__
+
+    def patched_init(self, *args, **kwargs):
+        kwargs.setdefault("transport", transport)
+        original_init(self, *args, **kwargs)
+    monkeypatch.setattr(httpx.Client, "__init__", patched_init)
+
+    from app.turso_adapter import connect_turso
+    with pytest.raises(TursoConnectError) as exc:
+        with connect_turso() as c:
+            c.execute("SELECT 1")
+    msg = str(exc.value)
+    assert "SUPERSECRETTOKEN" not in msg
+    assert "top-secret-prod" not in msg

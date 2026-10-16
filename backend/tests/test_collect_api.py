@@ -277,3 +277,30 @@ def test_idle_status_before_any_run(client):
     r = client.get("/api/collect/status")
     assert r.status_code == 200
     assert r.json()["status"] == "IDLE"
+
+
+def test_persistence_check_failed_marks_failed(client, monkeypatch):
+    """지시 #14 — 수집은 성공했는데 DB 에 쓰기가 안 됐으면 FAILED.
+
+    monkeypatch 로 upsert_ipo 를 no-op 으로 만들어 "쓰기 손실" 상황을 재현.
+    """
+    from app import collect as collect_mod
+    from app import store
+
+    items = [_disc("20261012000308", "[발행조건확정]증권신고서(지분증권)",
+                   "00534729", "디티에스")]
+    _mock_dart(monkeypatch, list_items=items)
+
+    original_process = collect_mod.process_corp
+
+    def process_but_lose_write(corp_code, items, *, log):
+        # 처리 흉내 — 반환값만 그대로, 실제 DB 쓰기 skip
+        return {"corp_code": corp_code, "corp_name": corp_code,
+                "status": "collected", "warnings_count": 0, "has_core_release": True}
+
+    monkeypatch.setattr(collect_mod, "process_corp", process_but_lose_write)
+
+    client.post("/api/collect")
+    s = _wait_done(client)
+    assert s["status"] == "FAILED"
+    assert "쓰기 검증" in s["error"]

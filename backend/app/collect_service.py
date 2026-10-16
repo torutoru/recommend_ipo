@@ -210,6 +210,39 @@ def _run() -> None:
             note=f"bgn={bgn} end={end} new={summary.new_count} updated={summary.updated_count} "
                  f"unchanged={summary.unchanged_count} failed={summary.failed_count} withdrawn={summary.withdrawn_count}",
         )
+
+    # 쓰기 검증 (지시 #14): 쓰기가 실제로 영속됐는지 **새 커넥션**으로 확인
+    # "성공했다고 보고했는데 데이터 없음" 재발 방지
+    expected_min_rows = summary.new_count + summary.updated_count
+    if expected_min_rows > 0:
+        try:
+            with store.connect() as conn:
+                row = conn.execute(
+                    "SELECT COUNT(*) AS c FROM ipos WHERE withdrawn_rcept_no IS NULL"
+                ).fetchone()
+                actual = int(row["c"]) if row is not None else 0
+        except Exception as e:
+            _set(
+                status="FAILED",
+                finished_at=now_iso_kst(),
+                summary=summary,
+                error=f"쓰기 검증 실패 (COUNT 조회 자체 실패) — {_sanitize_error(e)}",
+                progress=CollectProgress(done=done, total=total_disclosures),
+            )
+            return
+        if actual < expected_min_rows:
+            _set(
+                status="FAILED",
+                finished_at=now_iso_kst(),
+                summary=summary,
+                error=(
+                    f"쓰기 검증 실패 — 보고된 new+updated={expected_min_rows} 건이지만 "
+                    f"COUNT(ipos)={actual} 건. Turso 영속성 문제 의심."
+                ),
+                progress=CollectProgress(done=done, total=total_disclosures),
+            )
+            return
+
     _set(
         status="SUCCEEDED",
         finished_at=now_iso_kst(),

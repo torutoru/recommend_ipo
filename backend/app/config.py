@@ -35,6 +35,13 @@ class Settings(BaseSettings):
     incremental_overlap_days: int = 7     # 마지막 수집 시각 - N일부터 조회(정정 누락 방지)
     initial_days: int = 90                # 최초 실행 시 조회 범위
 
+    # IPO 식별 — 회사명에 아래 키워드가 포함되면 스팩으로 간주해 제외 (지시 #15, CSV).
+    # 사용자 결정으로 "기업인수목적" 외에 "스팩" 도 추가.
+    spac_exclusion_keywords: str = "기업인수목적,스팩"
+
+    def spac_keywords(self) -> list[str]:
+        return [k.strip() for k in self.spac_exclusion_keywords.split(",") if k.strip()]
+
     # 수집 보호 (requirements 12장, api-contract v0.7). 비어 있으면 보호 없음.
     collect_key: str = ""
 

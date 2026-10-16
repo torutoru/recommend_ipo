@@ -69,14 +69,20 @@ def classify_report(report_nm: str) -> Optional[str]:
 
 
 def is_ipo_candidate(disclosure: dict) -> bool:
-    """공시 하나의 메타만 보고 IPO 후보 여부 판정."""
+    """공시 하나의 메타만 보고 IPO 후보 여부 판정.
+
+    v0.7+ (지시 #15): 스팩 제외 키워드는 설정값(`SPAC_EXCLUSION_KEYWORDS` CSV).
+    기본값: "기업인수목적,스팩" — 회사명에 둘 중 하나라도 포함되면 제외.
+    """
     if disclosure.get("corp_cls") != "E":
         return False
     if (disclosure.get("stock_code") or "").strip():
         return False
     name = disclosure.get("corp_name") or ""
-    if "기업인수목적" in name:
-        return False
+    from .config import get_settings
+    for kw in get_settings().spac_keywords():
+        if kw and kw in name:
+            return False
     return True
 
 
