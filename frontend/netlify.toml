@@ -16,14 +16,13 @@
 
 # ───────────────────────────────────────────────────────────────────────────────
 # `/api/*` 프록시 — 반드시 SPA fallback 보다 "위" 에 와야 합니다.
-# Render 배포 후 `RENDER_HOST` 를 실제 호스트(예: recommend-ipo-api.onrender.com)로
-# 교체하고 커밋하면 Netlify 가 재배포합니다. 교체는 사용자가 수동으로.
+# target 호스트: Render 백엔드. 변경 시 아래 to= 한 줄만 수정 후 커밋.
 # 같은 오리진으로 호출되어 CORS 설정이 필요 없고, 백엔드 주소도 노출되지 않습니다.
 # ───────────────────────────────────────────────────────────────────────────────
 
 [[redirects]]
   from = "/api/*"
-  to = "https://RENDER_HOST/api/:splat"
+  to = "https://recommend-ipo-api.onrender.com/api/:splat"
   status = 200
   force = true
 

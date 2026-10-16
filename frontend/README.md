@@ -69,20 +69,21 @@ frontend 는 Netlify, backend 는 Render (별도 세션). 실제 계정 연결·
 3. 그 외는 `frontend/netlify.toml` 이 자동 로드 — `command = "npm run build"`, `publish = "dist"`, Node 20.
 4. SPA fallback(`/* → /index.html 200`) 과 `/api/*` 프록시가 함께 설정됨.
 
-### Render 호스트 교체
+### Render 호스트
 
-`netlify.toml` 의 다음 줄에서 `RENDER_HOST` 를 실제 Render 호스트로 바꿔 커밋합니다 (예: `recommend-ipo-api.onrender.com`):
+현재 target: `https://recommend-ipo-api.onrender.com`. `netlify.toml` 에 반영돼 있습니다:
 
 ```toml
 [[redirects]]
   from = "/api/*"
-  to = "https://RENDER_HOST/api/:splat"
+  to = "https://recommend-ipo-api.onrender.com/api/:splat"
   status = 200
   force = true
 ```
 
 - 같은 오리진 프록시이므로 **CORS 설정이 불필요**하고, 백엔드 호스트가 **브라우저 네트워크에 노출되지 않습니다**.
 - `/api/*` 리다이렉트가 SPA fallback 보다 **위**에 와야 함 (파일에 이미 그렇게 돼 있음).
+- 호스트가 바뀌면 위 한 줄만 수정 후 커밋.
 
 ### 환경 변수
 
