@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# venv
+.venv/
+venv/
+
+# SQLite
+*.sqlite3
+*.db
+
+# 로컬 캡처·실험 데이터 (OpenDART 응답 샘플 등)
+data/
+
+# 로컬 환경 (DART_CERT_KEY 등). 루트 .gitignore 가 .env/.env.* 도 걸러주지만 중복 명시.
+.env
+.env.*
+!.env.example

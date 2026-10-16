@@ -1,0 +1,62 @@
+# 판정 기준값 (requirements.md v2 / api-contract v0.3).
+# 모든 값은 코드 수정 없이 조정 가능. /api/scoring-config 가 이 파일을 그대로 반환.
+
+score:
+  comp:
+    max: 35
+    # tiers: gte 내림차순. 처음 만족하는 구간의 points.
+    tiers:
+      - { gte: 1500.0, points: 35 }
+      - { gte: 1000.0, points: 25 }
+      - { gte: 500.0,  points: 15 }
+    default: 0
+    # 대형주 보완 가산(v0.6): 공모 금액 ≥ min_offering_amount_krw AND 경쟁률 ≥ min_competition_rate → +points
+    large_cap_bonus:
+      min_offering_amount_krw: 100000000000   # 1,000억 원
+      min_competition_rate: 800.0             # :1
+      points: 5
+
+  price:
+    max: 25
+    points:
+      ABOVE_BAND:  25
+      TOP_OF_BAND: 20
+      WITHIN_BAND: 10
+      BELOW_BAND:  0
+
+  lockup:
+    max: 20
+    tiers:
+      - { gte: 20.0, points: 20 }
+      - { gte: 10.0, points: 15 }
+      - { gte: 5.0,  points: 10 }
+    default: 0
+
+  flow:
+    max: 20
+    # 판정 순서: zero_if → top_if → otherwise
+    zero_if:
+      tradable_gt: 35.0        # 유통가능 > 35
+      old_share_gte: 30.0      # 또는 구주매출 >= 30 (둘 중 하나라도 → 0)
+    top_if:
+      tradable_lt: 25.0        # 유통가능 < 25
+      old_share_eq: 0.0        # 그리고 구주매출 == 0
+      points: 20
+    otherwise: 12
+
+grade:
+  pass_min: 50
+  s_min: 80
+  a_min: 65
+
+deposit:
+  default_shares: 10
+  margin_rate: 0.5
+  fee_krw: 2000
+
+checklist:
+  competition_min: 1500.0            # ≥ 이면 MET
+  price_positions_met: [TOP_OF_BAND, ABOVE_BAND]
+  lockup_min: 10.0                   # ≥ 이면 MET
+  flow_tradable_max: 35.0            # 유통 ≤ 이고
+  flow_old_share_lt: 30.0            # 구주 < 이면 MET

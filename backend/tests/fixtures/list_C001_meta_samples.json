@@ -1,0 +1,54 @@
+{
+  "status": "000",
+  "message": "정상",
+  "page_no": 1,
+  "page_count": 4,
+  "total_count": 4,
+  "total_page": 1,
+  "list": [
+    {
+      "corp_code": "00252269",
+      "corp_name": "아이에이",
+      "stock_code": "038880",
+      "corp_cls": "K",
+      "report_nm": "[기재정정]증권신고서(지분증권)",
+      "rcept_no": "20261015000431",
+      "flr_nm": "아이에이",
+      "rcept_dt": "20261015",
+      "rm": ""
+    },
+    {
+      "corp_code": "02032951",
+      "corp_name": "에스케이증권제14호기업인수목적",
+      "stock_code": "",
+      "corp_cls": "E",
+      "report_nm": "[발행조건확정]증권신고서(지분증권)",
+      "rcept_no": "20261014000196",
+      "flr_nm": "에스케이증권제14호기업인수목적",
+      "rcept_dt": "20261014",
+      "rm": ""
+    },
+    {
+      "corp_code": "01160363",
+      "corp_name": "에코프로비엠",
+      "stock_code": "247540",
+      "corp_cls": "K",
+      "report_nm": "[발행조건확정]증권신고서(지분증권)",
+      "rcept_no": "20261013000214",
+      "flr_nm": "에코프로비엠",
+      "rcept_dt": "20261013",
+      "rm": ""
+    },
+    {
+      "corp_code": "00534729",
+      "corp_name": "디티에스",
+      "stock_code": "",
+      "corp_cls": "E",
+      "report_nm": "[발행조건확정]증권신고서(지분증권)",
+      "rcept_no": "20261012000308",
+      "flr_nm": "디티에스",
+      "rcept_dt": "20261012",
+      "rm": ""
+    }
+  ]
+}

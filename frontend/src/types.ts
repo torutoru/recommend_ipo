@@ -1,0 +1,213 @@
+// .claude/co-work/api-contract.md (v0.3) 와 1:1 매칭. 변경 전 pm 과 협상.
+
+export type Status = 'PENDING' | 'PASS' | 'REJECT'
+export type Grade = 'S' | 'A' | 'B' // v0.3: C 삭제
+export type Market = 'KOSPI' | 'KOSDAQ' | 'KONEX'
+export type PricePosition =
+  | 'ABOVE_BAND'   // 확정가 > 밴드 상단
+  | 'TOP_OF_BAND'  // 확정가 = 밴드 상단
+  | 'WITHIN_BAND'  // 밴드 하단 <= 확정가 < 밴드 상단  (v0.3)
+  | 'BELOW_BAND'   // 확정가 < 밴드 하단               (v0.3)
+export type DocType =
+  | 'PROSPECTUS'
+  | 'PROSPECTUS_AMENDED'
+  | 'REGISTRATION_AMENDED'
+  | 'ISSUANCE_REPORT'
+export type CompetitionRateType = 'simple' | 'weighted'
+export type LockupRatioBasis = 'allocated' | 'applied'
+
+export type ChecklistKey =
+  | 'competition'
+  | 'price_position'
+  | 'lockup'
+  | 'flow'
+  | 'min_deposit'
+  | 'sell_timing'
+
+export type ChecklistResult = 'MET' | 'NOT_MET' | 'UNKNOWN' | 'INFO'
+
+export interface ChecklistItem {
+  key: ChecklistKey
+  label: string
+  indicator: string
+  criterion: string
+  actual: string | null
+  result: ChecklistResult
+}
+
+export interface Verdict {
+  status: Status
+  grade: Grade | null
+  // PASS·REJECT 일 때 값. PENDING 은 null. 불변식: verdict.score === scores.total.
+  score: number | null
+}
+
+export interface IpoSummary {
+  id: string
+  corp_name: string
+  // MVP: 항상 null (requirements 8장)
+  market: Market | null
+  subscription_start: string | null
+  subscription_end: string | null
+  // MVP: 항상 null (requirements 8장)
+  listing_date: string | null
+  band_low: number | null
+  band_high: number | null
+  final_price: number | null
+  verdict: Verdict
+  updated_at: string
+}
+
+export interface Indicators {
+  competition_rate: number | null
+  competition_rate_type: CompetitionRateType | null
+  // 기관 신청 금액. v0.6: 가산 기준에서 제외됨 (참고 지표).
+  demand_amount_krw: number | null
+  price_position: PricePosition | null
+  lockup_ratio: number | null
+  lockup_ratio_basis: LockupRatioBasis | null
+  tradable_ratio: number | null
+  old_share_ratio: number | null
+  new_share_count: number | null
+  old_share_count: number | null
+  total_offering_count: number | null
+  // v0.6: 공모 금액. 원문 모집(매출) 총액 우선, 없으면 total_offering_count × final_price. 둘 다 없으면 null.
+  // 대형주 보완 가산의 판정 기준.
+  offering_amount_krw: number | null
+  report_rcept_no: string | null
+}
+
+export interface Scores {
+  comp: number | null   // 0~35
+  price: number | null  // 0~25
+  lockup: number | null // 0~20
+  flow: number | null   // 0~20
+  total: number | null  // 0~100
+}
+
+export interface SourceDoc {
+  doc_type: DocType
+  rcept_no: string
+  rcept_dt: string
+  url: string
+}
+
+export interface MinDeposit {
+  shares: number
+  deposit_krw: number
+  fee_krw: number
+  total_krw: number
+}
+
+export interface IpoDetail extends IpoSummary {
+  indicators: Indicators
+  scores: Scores
+  reasons: string[]
+  reject_reasons: string[]
+  min_deposit: MinDeposit | null
+  sources: SourceDoc[]
+  // v0.3: 가이드 2장 — 항상 6개, key 순서 고정
+  checklist: ChecklistItem[]
+}
+
+export interface ListParams {
+  status?: Status
+  from?: string
+  to?: string
+}
+
+export interface Health {
+  status: string
+  last_collected_at: string | null
+}
+
+// --- v0.5 수집 실행 (POST /api/collect, GET /api/collect/status) ---------
+
+export type CollectState = 'IDLE' | 'RUNNING' | 'SUCCEEDED' | 'FAILED'
+
+export interface CollectProgress {
+  done: number
+  total: number | null
+}
+
+export interface CollectSummary {
+  new_count: number
+  updated_count: number
+  unchanged_count: number
+  failed_count: number
+  withdrawn_count: number
+}
+
+export interface CollectStatus {
+  status: CollectState
+  started_at: string | null
+  finished_at: string | null
+  progress: CollectProgress | null
+  summary: CollectSummary | null
+  error: string | null
+  // /api/health 와 동일한 "마지막 성공 수집 시각".
+  last_collected_at: string | null
+}
+
+// POST /api/collect 응답 분기.
+// 202 → STARTED(새 작업 시작, data=시작 직후 CollectStatus)
+// 409 + CollectStatus → RUNNING(이미 실행 중, data=현재 상태)
+// 409 + {detail:...} → BLOCKED(샘플 모드 등 수집 불가, 메시지만)
+export type CollectStartResult =
+  | { kind: 'STARTED'; data: CollectStatus }
+  | { kind: 'RUNNING'; data: CollectStatus }
+  | { kind: 'BLOCKED'; detail: string }
+
+// GET /api/scoring-config v0.3 확정 구조
+export interface ScoringTier {
+  gte: number
+  points: number
+}
+
+export interface ScoringConfig {
+  score: {
+    comp: {
+      max: number
+      tiers: ScoringTier[]
+      default: number
+      // v0.6: 신청 금액 기반 가산 폐지 → 공모 금액 + 경쟁률 기반 "대형주 보완" 가산.
+      large_cap_bonus: {
+        min_offering_amount_krw: number
+        min_competition_rate: number
+        points: number
+      }
+    }
+    price: {
+      max: number
+      points: Record<PricePosition, number>
+    }
+    lockup: {
+      max: number
+      tiers: ScoringTier[]
+      default: number
+    }
+    flow: {
+      max: number
+      zero_if: { tradable_gt: number; old_share_gte: number }
+      top_if: { tradable_lt: number; old_share_eq: number; points: number }
+      otherwise: number
+    }
+  }
+  grade: {
+    pass_min: number
+    s_min: number
+    a_min: number
+  }
+  deposit: {
+    default_shares: number
+    margin_rate: number
+    fee_krw: number
+  }
+  checklist: {
+    competition_min: number
+    price_positions_met: PricePosition[]
+    lockup_min: number
+    flow_tradable_max: number
+    flow_old_share_lt: number
+  }
+}

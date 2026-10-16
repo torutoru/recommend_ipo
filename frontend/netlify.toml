@@ -1,0 +1,35 @@
+# recommend_ipo frontend — Netlify 설정
+#
+# 저장소를 Netlify 사이트에 연결할 때 "Base directory" 를 `frontend` 로 지정합니다.
+# `base` 가 설정되면 아래 command/publish 는 base 기준 상대 경로입니다.
+
+[build]
+  base = "frontend"
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# ───────────────────────────────────────────────────────────────────────────────
+# `/api/*` 프록시 — 반드시 SPA fallback 보다 "위" 에 와야 합니다.
+# Render 배포 후 `RENDER_HOST` 를 실제 호스트(예: recommend-ipo-api.onrender.com)로
+# 교체하고 커밋하면 Netlify 가 재배포합니다. 교체는 사용자가 수동으로.
+# 같은 오리진으로 호출되어 CORS 설정이 필요 없고, 백엔드 주소도 노출되지 않습니다.
+# ───────────────────────────────────────────────────────────────────────────────
+
+[[redirects]]
+  from = "/api/*"
+  to = "https://RENDER_HOST/api/:splat"
+  status = 200
+  force = true
+
+# ───────────────────────────────────────────────────────────────────────────────
+# SPA fallback — React Router 경로를 index.html 로 돌려 보냅니다.
+# `/api/*` 다음에 둡니다 (순서 중요).
+# ───────────────────────────────────────────────────────────────────────────────
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

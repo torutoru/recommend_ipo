@@ -1,0 +1,12 @@
+# Claude co-work 프로토콜 파일 (Claude 작업 참고용, git/docker/핫리로드 대상 아님)
+.claude/co-work/
+
+# 비밀값 (DART API 키 등)
+.env
+.env.*
+!.env.example
+
+# 빌드 부산물 (tsc -b 산출물)
+*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts

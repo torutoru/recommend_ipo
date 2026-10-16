@@ -1,0 +1,128 @@
+from __future__ import annotations
+
+from functools import lru_cache
+from pathlib import Path
+from typing import Literal
+
+import yaml
+from pydantic import BaseModel, Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=str(BACKEND_DIR / ".env.local"),
+        env_file_encoding="utf-8",
+        extra="ignore",
+        case_sensitive=False,
+    )
+
+    dart_cert_key: str = Field(default="", description="DART OpenAPI 인증키. 로그·응답 출력 금지.")
+    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
+    scoring_config_path: Path = BACKEND_DIR / "app" / "config_files" / "scoring.yaml"
+    sqlite_path: Path = BACKEND_DIR / "data" / "recommend_ipo.sqlite"
+    use_sample_data: bool = True  # 수집 파이프라인 완성 전까지 샘플로 응답
+    market_dominance_ratio: float = 3.0   # extract_market fallback: 1위가 2위의 N배 이상이어야 채택
+
+
+# ---------- scoring.yaml 모델 (api-contract v0.3) ----------
+
+PricePositionKey = Literal["ABOVE_BAND", "TOP_OF_BAND", "WITHIN_BAND", "BELOW_BAND"]
+
+
+class ScoreTier(BaseModel):
+    gte: float
+    points: int
+
+
+class LargeCapBonus(BaseModel):
+    """v0.6: 공모 금액 >= min_offering_amount_krw AND 경쟁률 >= min_competition_rate 일 때 +points."""
+    min_offering_amount_krw: int
+    min_competition_rate: float
+    points: int
+
+
+class CompScoreConfig(BaseModel):
+    max: int
+    tiers: list[ScoreTier]
+    default: int
+    large_cap_bonus: LargeCapBonus
+
+
+class PriceScoreConfig(BaseModel):
+    max: int
+    points: dict[PricePositionKey, int]
+
+
+class LockupScoreConfig(BaseModel):
+    max: int
+    tiers: list[ScoreTier]
+    default: int
+
+
+class FlowZeroIf(BaseModel):
+    tradable_gt: float
+    old_share_gte: float
+
+
+class FlowTopIf(BaseModel):
+    tradable_lt: float
+    old_share_eq: float
+    points: int
+
+
+class FlowScoreConfig(BaseModel):
+    max: int
+    zero_if: FlowZeroIf
+    top_if: FlowTopIf
+    otherwise: int
+
+
+class ScoreConfig(BaseModel):
+    comp: CompScoreConfig
+    price: PriceScoreConfig
+    lockup: LockupScoreConfig
+    flow: FlowScoreConfig
+
+
+class GradeConfig(BaseModel):
+    pass_min: int
+    s_min: int
+    a_min: int
+
+
+class DepositConfig(BaseModel):
+    default_shares: int
+    margin_rate: float
+    fee_krw: int
+
+
+class ChecklistConfig(BaseModel):
+    competition_min: float
+    price_positions_met: list[PricePositionKey]
+    lockup_min: float
+    flow_tradable_max: float
+    flow_old_share_lt: float
+
+
+class ScoringConfig(BaseModel):
+    score: ScoreConfig
+    grade: GradeConfig
+    deposit: DepositConfig
+    checklist: ChecklistConfig
+
+
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    return Settings()
+
+
+@lru_cache(maxsize=1)
+def get_scoring_config() -> ScoringConfig:
+    path = get_settings().scoring_config_path
+    with path.open("r", encoding="utf-8") as f:
+        raw = yaml.safe_load(f)
+    return ScoringConfig.model_validate(raw)

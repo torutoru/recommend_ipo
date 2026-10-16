@@ -1,0 +1,284 @@
+"""SQLite 저장소 — 수집·조회.
+
+- 표준 라이브러리 sqlite3 사용(의존성 추가 없음).
+- 스키마는 **파싱 결과(parser.ParsedIpo + 식별 메타)**를 보존하고, 응답은 매번 점수 재계산 전제.
+  (설정 변경 시 재수집 없이 점수가 갱신되도록.)
+- 외부 수집기(collect.py)만 쓰기, 라우터는 읽기만.
+"""
+from __future__ import annotations
+
+import json
+import sqlite3
+from contextlib import contextmanager
+from datetime import datetime
+from pathlib import Path
+from typing import Iterator, Optional
+
+from .config import get_settings
+
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS ipos (
+    corp_code                TEXT PRIMARY KEY,
+    corp_name                TEXT NOT NULL,
+    market                   TEXT,              -- v0.4
+    subscription_start       TEXT,
+    subscription_end         TEXT,
+    listing_date             TEXT,              -- v0.4
+    band_low                 INTEGER,
+    band_high                INTEGER,
+    final_price              INTEGER,
+    price_position           TEXT,
+    competition_rate         REAL,
+    competition_rate_type    TEXT,
+    demand_quantity          INTEGER,
+    demand_amount_krw        INTEGER,
+    lockup_ratio             REAL,
+    lockup_ratio_basis       TEXT,
+    tradable_ratio           REAL,
+    old_share_ratio          REAL,
+    new_share_count          INTEGER,
+    old_share_count          INTEGER,
+    total_offering_count     INTEGER,
+    offering_amount_krw      INTEGER,            -- v0.6
+    report_rcept_no          TEXT,
+    updated_at               TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sources (
+    corp_code  TEXT NOT NULL,
+    doc_type   TEXT NOT NULL,
+    rcept_no   TEXT NOT NULL,
+    rcept_dt   TEXT NOT NULL,
+    url        TEXT NOT NULL,
+    PRIMARY KEY (corp_code, rcept_no),
+    FOREIGN KEY (corp_code) REFERENCES ipos(corp_code) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS parse_warnings (
+    corp_code  TEXT NOT NULL,
+    seq        INTEGER NOT NULL,
+    message    TEXT NOT NULL,
+    PRIMARY KEY (corp_code, seq),
+    FOREIGN KEY (corp_code) REFERENCES ipos(corp_code) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS collect_runs (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at    TEXT NOT NULL,
+    finished_at   TEXT,
+    days          INTEGER,
+    collected     INTEGER DEFAULT 0,
+    errors        INTEGER DEFAULT 0,
+    note          TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_ipos_subscription_start ON ipos(subscription_start);
+CREATE INDEX IF NOT EXISTS idx_ipos_listing_date ON ipos(listing_date);
+"""
+
+
+# ---------- 연결 ----------
+
+def _resolve_path(path: Optional[Path]) -> Path:
+    p = path or get_settings().sqlite_path
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+@contextmanager
+def connect(path: Optional[Path] = None) -> Iterator[sqlite3.Connection]:
+    """매 호출마다 짧게 쓰고 닫는 커넥션. FK 활성화."""
+    conn = sqlite3.connect(str(_resolve_path(path)))
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    try:
+        yield conn
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def init_db(path: Optional[Path] = None) -> None:
+    with connect(path) as conn:
+        conn.executescript(SCHEMA)
+
+
+# ---------- 쓰기 ----------
+
+def upsert_ipo(
+    conn: sqlite3.Connection,
+    *,
+    corp_code: str,
+    corp_name: str,
+    market: Optional[str],
+    subscription_start: Optional[str],
+    subscription_end: Optional[str],
+    listing_date: Optional[str],
+    band_low: Optional[int],
+    band_high: Optional[int],
+    final_price: Optional[int],
+    price_position: Optional[str],
+    competition_rate: Optional[float],
+    competition_rate_type: Optional[str],
+    demand_quantity: Optional[int],
+    demand_amount_krw: Optional[int],
+    lockup_ratio: Optional[float],
+    lockup_ratio_basis: Optional[str],
+    tradable_ratio: Optional[float],
+    old_share_ratio: Optional[float],
+    new_share_count: Optional[int],
+    old_share_count: Optional[int],
+    total_offering_count: Optional[int],
+    offering_amount_krw: Optional[int],
+    report_rcept_no: Optional[str],
+) -> None:
+    now = datetime.now().astimezone().isoformat(timespec="seconds")
+    conn.execute(
+        """
+        INSERT INTO ipos (
+            corp_code, corp_name, market, subscription_start, subscription_end, listing_date,
+            band_low, band_high, final_price, price_position,
+            competition_rate, competition_rate_type, demand_quantity, demand_amount_krw,
+            lockup_ratio, lockup_ratio_basis, tradable_ratio, old_share_ratio,
+            new_share_count, old_share_count, total_offering_count, offering_amount_krw, report_rcept_no,
+            updated_at
+        ) VALUES (?,?,?,?,?,?, ?,?,?,?, ?,?,?,?, ?,?,?,?, ?,?,?,?,?, ?)
+        ON CONFLICT(corp_code) DO UPDATE SET
+            corp_name=excluded.corp_name,
+            market=excluded.market,
+            subscription_start=excluded.subscription_start,
+            subscription_end=excluded.subscription_end,
+            listing_date=excluded.listing_date,
+            band_low=excluded.band_low,
+            band_high=excluded.band_high,
+            final_price=excluded.final_price,
+            price_position=excluded.price_position,
+            competition_rate=excluded.competition_rate,
+            competition_rate_type=excluded.competition_rate_type,
+            demand_quantity=excluded.demand_quantity,
+            demand_amount_krw=excluded.demand_amount_krw,
+            lockup_ratio=excluded.lockup_ratio,
+            lockup_ratio_basis=excluded.lockup_ratio_basis,
+            tradable_ratio=excluded.tradable_ratio,
+            old_share_ratio=excluded.old_share_ratio,
+            new_share_count=excluded.new_share_count,
+            old_share_count=excluded.old_share_count,
+            total_offering_count=excluded.total_offering_count,
+            offering_amount_krw=excluded.offering_amount_krw,
+            report_rcept_no=excluded.report_rcept_no,
+            updated_at=excluded.updated_at
+        """,
+        (
+            corp_code, corp_name, market, subscription_start, subscription_end, listing_date,
+            band_low, band_high, final_price, price_position,
+            competition_rate, competition_rate_type, demand_quantity, demand_amount_krw,
+            lockup_ratio, lockup_ratio_basis, tradable_ratio, old_share_ratio,
+            new_share_count, old_share_count, total_offering_count, offering_amount_krw, report_rcept_no,
+            now,
+        ),
+    )
+
+
+def replace_sources(
+    conn: sqlite3.Connection,
+    corp_code: str,
+    sources: list[dict],
+) -> None:
+    conn.execute("DELETE FROM sources WHERE corp_code = ?", (corp_code,))
+    conn.executemany(
+        "INSERT INTO sources (corp_code, doc_type, rcept_no, rcept_dt, url) VALUES (?,?,?,?,?)",
+        [
+            (corp_code, s["doc_type"], s["rcept_no"], s["rcept_dt"], s["url"])
+            for s in sources
+        ],
+    )
+
+
+def replace_warnings(
+    conn: sqlite3.Connection,
+    corp_code: str,
+    warnings: list[str],
+) -> None:
+    conn.execute("DELETE FROM parse_warnings WHERE corp_code = ?", (corp_code,))
+    conn.executemany(
+        "INSERT INTO parse_warnings (corp_code, seq, message) VALUES (?,?,?)",
+        [(corp_code, i, w) for i, w in enumerate(warnings)],
+    )
+
+
+def start_collect_run(conn: sqlite3.Connection, days: int) -> int:
+    cur = conn.execute(
+        "INSERT INTO collect_runs (started_at, days) VALUES (?, ?)",
+        (datetime.now().astimezone().isoformat(timespec="seconds"), days),
+    )
+    return cur.lastrowid
+
+
+def finish_collect_run(
+    conn: sqlite3.Connection, run_id: int, *, collected: int, errors: int, note: str = ""
+) -> None:
+    conn.execute(
+        "UPDATE collect_runs SET finished_at = ?, collected = ?, errors = ?, note = ? WHERE id = ?",
+        (datetime.now().astimezone().isoformat(timespec="seconds"), collected, errors, note, run_id),
+    )
+
+
+# ---------- 읽기 ----------
+
+def _row_to_dict(row: sqlite3.Row) -> dict:
+    return {k: row[k] for k in row.keys()}
+
+
+def list_ipos(path: Optional[Path] = None) -> list[dict]:
+    """모든 종목 + 각 종목의 sources·warnings 를 포함한 dict."""
+    with connect(path) as conn:
+        ipos = [_row_to_dict(r) for r in conn.execute(
+            "SELECT * FROM ipos ORDER BY COALESCE(subscription_start, '9999-99-99')"
+        )]
+        srcs: dict[str, list[dict]] = {}
+        for r in conn.execute("SELECT * FROM sources ORDER BY rcept_dt"):
+            srcs.setdefault(r["corp_code"], []).append({
+                "doc_type": r["doc_type"],
+                "rcept_no": r["rcept_no"],
+                "rcept_dt": r["rcept_dt"],
+                "url": r["url"],
+            })
+        warns: dict[str, list[str]] = {}
+        for r in conn.execute("SELECT * FROM parse_warnings ORDER BY seq"):
+            warns.setdefault(r["corp_code"], []).append(r["message"])
+        for i in ipos:
+            i["sources"] = srcs.get(i["corp_code"], [])
+            i["warnings"] = warns.get(i["corp_code"], [])
+    return ipos
+
+
+def get_ipo(corp_code: str, path: Optional[Path] = None) -> Optional[dict]:
+    with connect(path) as conn:
+        row = conn.execute("SELECT * FROM ipos WHERE corp_code = ?", (corp_code,)).fetchone()
+        if row is None:
+            return None
+        out = _row_to_dict(row)
+        out["sources"] = [
+            {"doc_type": r["doc_type"], "rcept_no": r["rcept_no"],
+             "rcept_dt": r["rcept_dt"], "url": r["url"]}
+            for r in conn.execute(
+                "SELECT * FROM sources WHERE corp_code = ? ORDER BY rcept_dt", (corp_code,)
+            )
+        ]
+        out["warnings"] = [
+            r["message"]
+            for r in conn.execute(
+                "SELECT message FROM parse_warnings WHERE corp_code = ? ORDER BY seq", (corp_code,)
+            )
+        ]
+        return out
+
+
+def last_collected_at(path: Optional[Path] = None) -> Optional[str]:
+    with connect(path) as conn:
+        row = conn.execute(
+            "SELECT finished_at FROM collect_runs WHERE finished_at IS NOT NULL "
+            "ORDER BY finished_at DESC LIMIT 1"
+        ).fetchone()
+        return row["finished_at"] if row else None
