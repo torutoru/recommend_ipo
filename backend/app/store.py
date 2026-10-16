@@ -16,7 +16,7 @@ from .time_utils import now_iso_kst
 from pathlib import Path
 from typing import Iterator, Optional
 
-from .config import get_settings
+from .config import get_settings, use_turso
 
 
 SCHEMA = """
@@ -91,7 +91,18 @@ def _resolve_path(path: Optional[Path]) -> Path:
 
 @contextmanager
 def connect(path: Optional[Path] = None) -> Iterator[sqlite3.Connection]:
-    """매 호출마다 짧게 쓰고 닫는 커넥션. FK 활성화."""
+    """매 호출마다 짧게 쓰고 닫는 커넥션. FK 활성화.
+
+    v0.7 (requirements 12장): `TURSO_DATABASE_URL`/`TURSO_AUTH_TOKEN` 둘 다 설정되면 Turso 로 연결.
+    **연결 실패는 조용히 SQLite 로 fallback 하지 않는다** — pm 지시 #12.
+    `TursoConnectError` 그대로 전파 → 서버 기동 실패 또는 수집 실패로 명시.
+    """
+    if use_turso():
+        from .turso_adapter import connect_turso  # 지연 import (Windows 에서 전혀 안 불러감)
+        with connect_turso() as tconn:
+            yield tconn  # TursoConnection — sqlite3.Connection 와 유사 인터페이스
+        return
+
     conn = sqlite3.connect(str(_resolve_path(path)))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
@@ -102,9 +113,28 @@ def connect(path: Optional[Path] = None) -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
+# 운영 DB(Turso·배포된 SQLite) 에 안전한 컬럼 추가용 마이그레이션.
+# SQLite 는 `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` 를 지원하지 않으므로 PRAGMA 로 체크.
+# **DROP·DELETE 금지** — 추가만. 이 함수는 init_db() 가 자동 호출한다.
+_MIGRATIONS: list[tuple[str, str, str]] = [
+    # (table, column, DDL — "ALTER TABLE {table} ADD COLUMN {column} ..." 뒷부분)
+    # 예: 미래에 ipos 에 withdrawn_rcept_no 를 ipos 에 추가해야 할 때
+    #   ("ipos", "some_new_col", "some_new_col TEXT"),
+]
+
+
+def _run_migrations(conn: sqlite3.Connection) -> None:
+    """존재하지 않는 컬럼만 ADD COLUMN. DROP 금지."""
+    for table, column, ddl in _MIGRATIONS:
+        existing = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
+
+
 def init_db(path: Optional[Path] = None) -> None:
     with connect(path) as conn:
         conn.executescript(SCHEMA)
+        _run_migrations(conn)
 
 
 # ---------- 쓰기 ----------

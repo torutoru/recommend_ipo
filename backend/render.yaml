@@ -1,0 +1,35 @@
+# Render Blueprint — recommend_ipo backend
+# https://render.com/docs/blueprint-spec
+#
+# 배포 전제 (requirements 12장, api-contract v0.7):
+# - 사용자가 Render 대시보드에서 각 환경변수의 값을 입력(이 파일에는 키 이름만, `sync: false`)
+# - 디스크는 재시작 시 초기화 — DB 는 Turso, ZIP 캐시는 휘발성(없으면 재다운로드)
+# - COLLECT_KEY 는 사용자 결정으로 **사용하지 않음**(설정 안 함 → 수집 보호 비활성)
+services:
+  - type: web
+    name: recommend-ipo-api       # 사용자가 수동 생성한 Render 서비스 이름 (pm 지시 #12)
+    runtime: python
+    plan: free
+    region: singapore             # OpenDART 호출 지연 최소화 — 사용자 재조정 가능
+    rootDir: backend
+    pythonVersion: "3.12"
+    buildCommand: pip install -r requirements.txt
+    # 워커 1개 (collect_service.threading.Lock 이 프로세스 내 동시 실행 1개를 보장)
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      # 비밀값·외부 URL — 대시보드에서 입력
+      - key: DART_CERT_KEY
+        sync: false
+      - key: TURSO_DATABASE_URL
+        sync: false
+      - key: TURSO_AUTH_TOKEN
+        sync: false
+      # CORS_ORIGINS 는 Netlify 프록시(같은 오리진) 덕에 운영에선 보통 **불필요**.
+      # 다른 도메인에서 직접 호출될 때만 CSV 로 추가(예: "https://a.example,https://b.example").
+      # - key: CORS_ORIGINS
+      #   sync: false
+      # COLLECT_KEY — 사용자 결정으로 비활성(설정 안 함 → 수집 보호 없음).
+      # - key: COLLECT_KEY
+      #   sync: false

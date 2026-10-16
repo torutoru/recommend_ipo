@@ -211,6 +211,56 @@ def extract_subscription_dates(xml: str) -> tuple[Optional[str], Optional[str]]:
     return _d(m.group(1), m.group(2), m.group(3)), _d(m.group(4), m.group(5), m.group(6))
 
 
+# ---------- 의무보유확약 비율 (v0.5 보강 — 테이블 집계) ----------
+
+# "(다) 의무보유확약기간별 수요예측 참여내역" 섹션에서:
+# - "합계" TR 의 수량 셀 합 = 전체 신청 수량
+# - "미확약" TR 의 수량 셀 합 = 미확약 신청 수량
+# - 확약 비율(applied) = (전체 - 미확약) / 전체 × 100
+# 각 TR 안의 셀은 (건수, 수량, 신청가격) × N기관 → 큰 수(>=1,000,000)만 수량으로 간주해 합산.
+
+_RE_LOCKUP_SECTION = re.compile(
+    r"\(다\)\s*의무보유확약기간별\s*수요예측\s*참여내역(.*?)(?=\(라\)|\(마\)|\(바\)|<SPAN\s+USERMARK=\"0X0000FF\">)",
+    re.DOTALL,
+)
+
+
+def _sum_large_cells_in_row(section: str, label: str, min_value: int = 1_000_000) -> Optional[int]:
+    """섹션 안에서 첫 셀 텍스트가 label 과 같은 TR 을 찾아, min_value 이상의 숫자 셀을 모두 합산."""
+    for tr in _RE_ROW.finditer(section):
+        cells = [_strip_tags(c) for c in _RE_CELL.findall(tr.group("body"))]
+        if not cells or cells[0] != label:
+            continue
+        total = 0
+        found_any = False
+        for c in cells[1:]:
+            n = _to_int(c)
+            if n is None:
+                continue
+            if n >= min_value:
+                total += n
+                found_any = True
+        if found_any:
+            return total
+    return None
+
+
+def extract_lockup(xml: str) -> tuple[Optional[float], Optional[Literal["allocated", "applied"]]]:
+    """의무보유확약 비율(%) + 기준(신청/배정)."""
+    m = _RE_LOCKUP_SECTION.search(xml)
+    if not m:
+        return None, None
+    section = m.group(1)
+    total = _sum_large_cells_in_row(section, "합계")
+    unlocked = _sum_large_cells_in_row(section, "미확약")
+    if total is None or unlocked is None or total <= 0:
+        return None, None
+    locked = total - unlocked
+    if locked < 0:
+        return None, None
+    return round(locked / total * 100, 2), "applied"
+
+
 # ---------- 유통가능 비율 (v0.5 — 서술형) ----------
 
 # 예(디티에스): "약 15.15%에 해당하는 2,250,787주는 상장 직후 유통가능물량입니다"
@@ -218,14 +268,23 @@ _RE_TRADABLE_RATIO_NARRATIVE = re.compile(
     r"약\s*([\d.]+)\s*%\s*에\s*해당하는\s*[\d,]+\s*주[^<]{0,40}유통가능물량"
 )
 
+# fallback: 테이블 "유통가능물량(A-B)" 라벨 셀 뒤 300자 이내에서 "N.NN%" 매치 (첫 매치).
+# 중간에 한글 라벨(최대주주/벤처금융 등)이 끼면 다른 섹션이므로 거부.
+_RE_TRADABLE_RATIO_TABLE = re.compile(
+    r"유통가능물량[^가-힣%]{0,300}?([\d]+\.?\d+)\s*%"
+)
+
 
 def extract_tradable_ratio(xml: str) -> Optional[float]:
-    """상장일 유통가능 비율(%). 서술형 매칭이 안 되면 null — 테이블 추출은 1차 범위 밖."""
+    """상장일 유통가능 비율(%). 서술형 → 테이블 fallback 순."""
     text = _strip_tags(xml)
     m = _RE_TRADABLE_RATIO_NARRATIVE.search(text)
-    if not m:
-        return None
-    return _to_float(m.group(1))
+    if m:
+        return _to_float(m.group(1))
+    m2 = _RE_TRADABLE_RATIO_TABLE.search(text)
+    if m2:
+        return _to_float(m2.group(1))
+    return None
 
 
 # ---------- 시장 구분 (v0.4) ----------
@@ -466,12 +525,14 @@ def parse(
             "유통가능 비율 서술형 패턴을 찾지 못함 — null 유지 (테이블 추출은 보강 과제)"
         )
 
-    # 확약 비율은 테이블 구조가 너무 복잡해 1차 보류 — null + 경고
-    out.lockup_ratio = None
-    out.lockup_ratio_basis = None
-    out.warnings.append(
-        "의무보유확약 비율은 1차 파서에서 미구현 (테이블 heading + 합계 셀 매칭 보강 과제)"
-    )
+    # 의무보유확약 비율 (v0.5 보강) — (다) 섹션 합계·미확약 TR 집계
+    lockup_r, lockup_basis = extract_lockup(xml)
+    out.lockup_ratio = lockup_r
+    out.lockup_ratio_basis = lockup_basis
+    if lockup_r is None:
+        out.warnings.append(
+            "의무보유확약 비율 테이블(다)에서 합계/미확약 수량을 집계하지 못함 — null 유지"
+        )
 
     # 메타 보조 로그
     if rcept_no:

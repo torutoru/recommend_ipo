@@ -15,6 +15,7 @@ from app.parser import (
     extract_final_price,
     extract_demand_result,
     extract_listing_date,
+    extract_lockup,
     extract_market,
     extract_offering_amount_krw,
     extract_offering_counts,
@@ -98,9 +99,9 @@ def test_dtis_parse_full(dtis_xml_bytes):
     assert p.demand_amount_krw == 1_644_913_000 * 18_500
     # 유통가능은 v0.5 서술형 파서로 추출됨 (15.15%)
     assert p.tradable_ratio == 15.15
-    # 확약은 1차 파서 미구현 → null + 경고
-    assert p.lockup_ratio is None
-    assert any("의무보유확약" in w and "미구현" in w for w in p.warnings)
+    # 확약은 v0.5 보강으로 테이블 집계 — 디티에스 14.13% (applied)
+    assert p.lockup_ratio == 14.13
+    assert p.lockup_ratio_basis == "applied"
 
 
 # ---------------------- offering 추출 fail-soft ----------------------
@@ -109,6 +110,34 @@ def test_offering_counts_graceful_when_absent():
     # 구조에 명확한 "신주 모집 N 주" 패턴이 없을 수 있음 — None 허용
     off = extract_offering_counts("아무 텍스트도 없음")
     assert off == {"new": None, "old": None, "total": None}
+
+
+# ---------------------- v0.5 보강 — 의무보유확약 (테이블 집계) ----------------------
+
+def test_dtis_lockup_ratio_applied_basis(dtis_xml_text):
+    """실측 — 디티에스 의무보유확약 비율 (신청 기준, applied).
+
+    계산:
+      전체 신청 수량(합계 TR) - 미확약 수량(미확약 TR) = 확약 수량
+      확약 수량 / 전체 × 100 = lockup_ratio
+    기관 7유형 각각 (건수, 수량, 신청가격) 셀 중 >=1,000,000 인 셀만 수량으로 합산.
+    """
+    ratio, basis = extract_lockup(dtis_xml_text)
+    assert basis == "applied"
+    assert ratio is not None
+    # 디티에스 실측: 14.13% (총 신청 수량 중 확약 비율)
+    assert ratio == 14.13
+
+
+def test_dtis_parse_fills_lockup(dtis_xml_bytes):
+    p = parse(dtis_xml_bytes, rcept_no="20261012000308", corp_name="디티에스",
+              rcept_dt="2026-10-12")
+    assert p.lockup_ratio == 14.13
+    assert p.lockup_ratio_basis == "applied"
+
+
+def test_extract_lockup_none_when_no_section():
+    assert extract_lockup("아무 섹션 없음") == (None, None)
 
 
 # ---------------------- v0.4 — market / listing_date ----------------------
@@ -184,6 +213,23 @@ def test_dtis_parse_fills_tradable_ratio(dtis_xml_bytes):
     p = parse(dtis_xml_bytes, rcept_no="20261012000308", corp_name="디티에스",
               rcept_dt="2026-10-12")
     assert p.tradable_ratio == 15.15
+
+
+def test_tradable_ratio_table_fallback_when_narrative_missing():
+    """서술형 패턴 없이 '유통가능물량(A-B)' 테이블 셀만 있어도 추출."""
+    text = (
+        "<P>어떤 서술도 없음</P>"
+        "<TD>유통가능물량(A-B)</TD>"
+        "<TD>2,250,787</TD>"
+        "<TD>15.15%</TD>"
+    )
+    assert extract_tradable_ratio(text) == 15.15
+
+
+def test_tradable_ratio_table_fallback_blocked_by_other_section():
+    """중간에 한글 라벨이 있으면 다른 섹션으로 보고 매치 안 함."""
+    text = "유통가능물량 2,250,787  최대주주 등 100,000  44.24%"
+    assert extract_tradable_ratio(text) is None
 
 
 # ---------------------- v0.6 — offering_amount_krw ----------------------

@@ -21,10 +21,14 @@ class Settings(BaseSettings):
     )
 
     dart_cert_key: str = Field(default="", description="DART OpenAPI 인증키. 로그·응답 출력 금지.")
-    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
+    # CORS 환경변수 `CORS_ORIGINS` 에 CSV 로. 예: "http://localhost:5173,https://my-netlify.app"
+    cors_origins: str = Field(default="http://localhost:5173")
+
+    def allowed_origins(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
     scoring_config_path: Path = BACKEND_DIR / "app" / "config_files" / "scoring.yaml"
     sqlite_path: Path = BACKEND_DIR / "data" / "recommend_ipo.sqlite"
-    use_sample_data: bool = True  # 수집 파이프라인 완성 전까지 샘플로 응답
+    use_sample_data: bool = False   # 기본: DB(수집기 결과). 테스트는 conftest 에서 True 로 강제.
     market_dominance_ratio: float = 3.0   # extract_market fallback: 1위가 2위의 N배 이상이어야 채택
 
     # 증분 수집 (requirements 11장)
