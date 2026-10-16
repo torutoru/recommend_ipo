@@ -20,6 +20,7 @@ from . import dart_client, store
 from .config import get_settings
 from .parser import parse
 from .schemas import CollectProgress, CollectStatus, CollectSummary
+from .time_utils import KST, kst_days_ago, now_iso_kst, now_kst
 
 
 _lock = threading.Lock()
@@ -62,7 +63,7 @@ def try_start() -> tuple[bool, CollectStatus]:
     """(실행 시작 여부, 현재 상태). 이미 실행 중이면 (False, 현재 상태)."""
     if not _lock.acquire(blocking=False):
         return False, current_status()
-    now = datetime.now().astimezone().isoformat(timespec="seconds")
+    now = now_iso_kst()
     _set(
         status="RUNNING",
         started_at=now,
@@ -79,18 +80,24 @@ def try_start() -> tuple[bool, CollectStatus]:
 # ---------- 실제 수집 ----------
 
 def _date_range() -> tuple[str, str]:
-    """YYYYMMDD 포맷의 (bgn_de, end_de). 마지막 성공 시각 - overlap_days 또는 initial_days 전."""
+    """YYYYMMDD(KST 기준) 포맷의 (bgn_de, end_de).
+
+    마지막 성공 시각 - overlap_days(최초면 initial_days 전) ~ 오늘(KST).
+    Render 가 UTC 라도 조회 범위는 서울 날짜로 통일.
+    """
     s = get_settings()
-    end = datetime.now()
+    end = now_kst()
     last = store.last_collected_at()
     if last:
         try:
             last_dt = datetime.fromisoformat(last)
-            bgn = last_dt - timedelta(days=s.incremental_overlap_days)
+            if last_dt.tzinfo is None:
+                last_dt = last_dt.replace(tzinfo=KST)
+            bgn = last_dt.astimezone(KST) - timedelta(days=s.incremental_overlap_days)
         except ValueError:
-            bgn = end - timedelta(days=s.initial_days)
+            bgn = kst_days_ago(s.initial_days)
     else:
-        bgn = end - timedelta(days=s.initial_days)
+        bgn = kst_days_ago(s.initial_days)
     fmt = "%Y%m%d"
     return bgn.strftime(fmt), end.strftime(fmt)
 
@@ -127,7 +134,7 @@ def _run_safely() -> None:
         msg = _sanitize_error(e)
         _set(
             status="FAILED",
-            finished_at=datetime.now().astimezone().isoformat(timespec="seconds"),
+            finished_at=now_iso_kst(),
             error=msg,
         )
     finally:
@@ -205,7 +212,7 @@ def _run() -> None:
         )
     _set(
         status="SUCCEEDED",
-        finished_at=datetime.now().astimezone().isoformat(timespec="seconds"),
+        finished_at=now_iso_kst(),
         summary=summary,
         progress=CollectProgress(done=done, total=total_disclosures),
     )

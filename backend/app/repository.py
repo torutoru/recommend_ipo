@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Optional
 
 from .config import get_scoring_config, get_settings
+from .time_utils import now_iso_kst
 from .schemas import (
     Indicators,
     IpoDetail,
@@ -66,7 +67,7 @@ def _detail_from_row(row: dict, shares: int) -> IpoDetail:
         band_high=row.get("band_high"),
         final_price=row.get("final_price"),
         verdict=build_verdict(result),
-        updated_at=row.get("updated_at") or datetime.now().astimezone().isoformat(timespec="seconds"),
+        updated_at=row.get("updated_at") or now_iso_kst(),
         indicators=ind,
         scores=result.scores,
         reasons=result.reasons,

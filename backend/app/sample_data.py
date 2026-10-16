@@ -17,6 +17,7 @@ from .schemas import (
     IpoDetail,
     SourceDoc,
 )
+from .time_utils import now_iso_kst
 from .scoring import (
     build_checklist,
     build_verdict,
@@ -51,7 +52,7 @@ def _build(
     result = evaluate(indicators, cfg)
     deposit = calc_min_deposit(final_price, shares, cfg)
     checklist = build_checklist(indicators, deposit, cfg, listing_date=listing_date)
-    now = datetime.now().astimezone().isoformat(timespec="seconds")
+    now = now_iso_kst()
 
     return IpoDetail(
         id=corp_code,
@@ -302,4 +303,4 @@ def get_detail(corp_code: str, shares: int) -> IpoDetail | None:
 
 
 def last_collected_at() -> str:
-    return datetime.now().astimezone().isoformat(timespec="seconds")
+    return now_iso_kst()

@@ -11,6 +11,8 @@ import json
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime
+
+from .time_utils import now_iso_kst
 from pathlib import Path
 from typing import Iterator, Optional
 
@@ -134,7 +136,7 @@ def upsert_ipo(
     offering_amount_krw: Optional[int],
     report_rcept_no: Optional[str],
 ) -> None:
-    now = datetime.now().astimezone().isoformat(timespec="seconds")
+    now = now_iso_kst()
     conn.execute(
         """
         INSERT INTO ipos (
@@ -223,7 +225,7 @@ def known_rcept_nos(conn: sqlite3.Connection) -> set[str]:
 
 def mark_withdrawn(conn: sqlite3.Connection, corp_code: str, rcept_no: str, now: Optional[str] = None) -> None:
     """철회 신고서 발견 → 종목에 withdrawn 플래그. ipos 레코드가 없으면 최소 메타만 생성."""
-    now = now or datetime.now().astimezone().isoformat(timespec="seconds")
+    now = now or now_iso_kst()
     conn.execute(
         """
         INSERT INTO ipos (corp_code, corp_name, withdrawn_rcept_no, updated_at)
@@ -239,7 +241,7 @@ def mark_withdrawn(conn: sqlite3.Connection, corp_code: str, rcept_no: str, now:
 def start_collect_run(conn: sqlite3.Connection, days: int) -> int:
     cur = conn.execute(
         "INSERT INTO collect_runs (started_at, days) VALUES (?, ?)",
-        (datetime.now().astimezone().isoformat(timespec="seconds"), days),
+        (now_iso_kst(), days),
     )
     return cur.lastrowid
 
@@ -249,7 +251,7 @@ def finish_collect_run(
 ) -> None:
     conn.execute(
         "UPDATE collect_runs SET finished_at = ?, collected = ?, errors = ?, note = ? WHERE id = ?",
-        (datetime.now().astimezone().isoformat(timespec="seconds"), collected, errors, note, run_id),
+        (now_iso_kst(), collected, errors, note, run_id),
     )
 
 

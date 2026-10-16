@@ -28,17 +28,14 @@ from app.main import create_app
 # ---------- 공통 fixture ----------
 
 @pytest.fixture(autouse=True)
-def _per_test_db(tmp_path, monkeypatch):
-    """테스트별 임시 SQLite 파일."""
-    db = tmp_path / "test.sqlite"
-    settings = get_settings()
-    original = settings.sqlite_path
-    settings.sqlite_path = db
-    # DB 재초기화
+def _reset_collect_state():
+    """각 테스트 전에 collect_service 상태(IDLE) + Lock 리셋.
+
+    sqlite_path 는 conftest 의 `_force_tmp_sqlite_path` 가 이미 tmp 로 돌려 둠.
+    """
     store.init_db()
     collect_service._reset_for_tests()
-    yield db
-    settings.sqlite_path = original
+    yield
 
 
 @pytest.fixture

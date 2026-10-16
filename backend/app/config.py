@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Optional
 
 import yaml
 from pydantic import BaseModel, Field
@@ -33,6 +33,11 @@ class Settings(BaseSettings):
 
     # 수집 보호 (requirements 12장, api-contract v0.7). 비어 있으면 보호 없음.
     collect_key: str = ""
+
+    # Turso (requirements 12장, 운영 DB).
+    # 두 변수가 모두 있으면 Turso, 없으면 로컬 SQLite. 테스트는 conftest 에서 둘 다 ""로 강제.
+    turso_database_url: str = ""
+    turso_auth_token: str = ""
 
 
 # ---------- scoring.yaml 모델 (api-contract v0.3) ----------
@@ -125,6 +130,12 @@ class ScoringConfig(BaseModel):
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return Settings()
+
+
+def use_turso(settings: Optional[Settings] = None) -> bool:
+    """Turso 사용 여부 — 환경변수(설정 객체) 둘 다 있어야 True."""
+    s = settings or get_settings()
+    return bool(s.turso_database_url) and bool(s.turso_auth_token)
 
 
 @lru_cache(maxsize=1)
