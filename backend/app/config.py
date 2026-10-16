@@ -27,6 +27,13 @@ class Settings(BaseSettings):
     use_sample_data: bool = True  # 수집 파이프라인 완성 전까지 샘플로 응답
     market_dominance_ratio: float = 3.0   # extract_market fallback: 1위가 2위의 N배 이상이어야 채택
 
+    # 증분 수집 (requirements 11장)
+    incremental_overlap_days: int = 7     # 마지막 수집 시각 - N일부터 조회(정정 누락 방지)
+    initial_days: int = 90                # 최초 실행 시 조회 범위
+
+    # 수집 보호 (requirements 12장, api-contract v0.7). 비어 있으면 보호 없음.
+    collect_key: str = ""
+
 
 # ---------- scoring.yaml 모델 (api-contract v0.3) ----------
 

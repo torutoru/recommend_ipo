@@ -14,14 +14,23 @@ Vite 가 `/api` 요청을 `http://localhost:8000` (backend FastAPI) 로 프록�
 
 ## 목업 ↔ 실 API 전환
 
-API 소스는 **한 곳**에서 토글합니다. `.env.development` 의 `VITE_USE_MOCK` 값으로 전환:
+**기본값은 실 API** (`src/config.ts` 가 `VITE_USE_MOCK === 'true'` 일 때만 목업).
+
+로컬 개발에서 목업을 쓰고 싶다면 **git 제외 파일**에 명시적으로 켭니다:
 
 ```
-VITE_USE_MOCK=true   # 목업 데이터 (기본값)
-VITE_USE_MOCK=false  # 실제 /api 호출
+# frontend/.env.development.local  (git 제외)
+VITE_USE_MOCK=true
 ```
 
-전환 후에는 `npm run dev` 를 재시작합니다 (Vite env 는 기동 시 로드).
+전환 후 `npm run dev` 를 재시작합니다 (Vite env 는 기동 시 로드).
+
+운영 빌드는 **벨트+멜빵**으로 두 곳에서 `false` 를 보장합니다:
+- `frontend/.env.production` (저장소에 커밋)
+- `frontend/netlify.toml` 의 `[build.environment]`
+
+Vite 는 USE_MOCK 이 false 로 평가되면 **운영 메인 번들에서 목업 코드를 완전히 제거** 합니다
+(동적 import — `src/api/index.ts` 참조). 종목명·fixture 등 샘플 데이터가 번들에 들어가지 않습니다.
 
 ## 디렉토리
 

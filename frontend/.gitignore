@@ -3,9 +3,18 @@ dist
 dist-ssr
 *.local
 
+# tsc -b 가 생성하는 인크리멘털 캐시 (출력물 아님).
+*.tsbuildinfo
+# tsc -b 가 vite.config.ts 를 처리하다 실수로 js/d.ts 를 뽑으면 커밋에서 뺀다.
+vite.config.js
+vite.config.d.ts
+vite.config.d.ts.map
+
 .env
 .env.*
 !.env.example
+# 운영 빌드 기본값 설정은 저장소에 커밋되어야 함 (비밀값 없음).
+!.env.production
 
 .vscode/*
 !.vscode/extensions.json

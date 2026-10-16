@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS ipos (
     total_offering_count     INTEGER,
     offering_amount_krw      INTEGER,            -- v0.6
     report_rcept_no          TEXT,
+    withdrawn_rcept_no       TEXT,               -- v0.5 — 철회 신고서 접수번호 (NOT NULL → 제외 종목)
     updated_at               TEXT NOT NULL
 );
 
@@ -207,6 +208,34 @@ def replace_warnings(
     )
 
 
+def known_rcept_nos(conn: sqlite3.Connection) -> set[str]:
+    """DB(sources + ipos.withdrawn_rcept_no + ipos.report_rcept_no)에 이미 들어와 있는 접수번호 집합.
+
+    증분 수집: 이 집합에 없는 접수번호만 새로 처리한다.
+    """
+    out: set[str] = set()
+    for r in conn.execute("SELECT rcept_no FROM sources"):
+        out.add(r["rcept_no"])
+    for r in conn.execute("SELECT withdrawn_rcept_no FROM ipos WHERE withdrawn_rcept_no IS NOT NULL"):
+        out.add(r["withdrawn_rcept_no"])
+    return out
+
+
+def mark_withdrawn(conn: sqlite3.Connection, corp_code: str, rcept_no: str, now: Optional[str] = None) -> None:
+    """철회 신고서 발견 → 종목에 withdrawn 플래그. ipos 레코드가 없으면 최소 메타만 생성."""
+    now = now or datetime.now().astimezone().isoformat(timespec="seconds")
+    conn.execute(
+        """
+        INSERT INTO ipos (corp_code, corp_name, withdrawn_rcept_no, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(corp_code) DO UPDATE SET
+            withdrawn_rcept_no=excluded.withdrawn_rcept_no,
+            updated_at=excluded.updated_at
+        """,
+        (corp_code, corp_code, rcept_no, now),
+    )
+
+
 def start_collect_run(conn: sqlite3.Connection, days: int) -> int:
     cur = conn.execute(
         "INSERT INTO collect_runs (started_at, days) VALUES (?, ?)",
@@ -231,10 +260,11 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
 
 
 def list_ipos(path: Optional[Path] = None) -> list[dict]:
-    """모든 종목 + 각 종목의 sources·warnings 를 포함한 dict."""
+    """모든 종목 + 각 종목의 sources·warnings 를 포함한 dict. 철회 종목은 제외."""
     with connect(path) as conn:
         ipos = [_row_to_dict(r) for r in conn.execute(
-            "SELECT * FROM ipos ORDER BY COALESCE(subscription_start, '9999-99-99')"
+            "SELECT * FROM ipos WHERE withdrawn_rcept_no IS NULL "
+            "ORDER BY COALESCE(subscription_start, '9999-99-99')"
         )]
         srcs: dict[str, list[dict]] = {}
         for r in conn.execute("SELECT * FROM sources ORDER BY rcept_dt"):
@@ -254,8 +284,12 @@ def list_ipos(path: Optional[Path] = None) -> list[dict]:
 
 
 def get_ipo(corp_code: str, path: Optional[Path] = None) -> Optional[dict]:
+    """철회 종목은 조회 불가(None 반환)."""
     with connect(path) as conn:
-        row = conn.execute("SELECT * FROM ipos WHERE corp_code = ?", (corp_code,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM ipos WHERE corp_code = ? AND withdrawn_rcept_no IS NULL",
+            (corp_code,),
+        ).fetchone()
         if row is None:
             return None
         out = _row_to_dict(row)

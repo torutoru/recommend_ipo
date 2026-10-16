@@ -118,3 +118,31 @@ class IpoList(BaseModel):
 class HealthResponse(BaseModel):
     status: Literal["ok"] = "ok"
     last_collected_at: Optional[str] = None
+
+
+# ---------- 수집 API (v0.5 + v0.7) ----------
+
+CollectRunStatus = Literal["IDLE", "RUNNING", "SUCCEEDED", "FAILED"]
+
+
+class CollectProgress(BaseModel):
+    done: int
+    total: Optional[int] = None   # 모르면 null
+
+
+class CollectSummary(BaseModel):
+    new_count: int = 0
+    updated_count: int = 0
+    unchanged_count: int = 0
+    failed_count: int = 0
+    withdrawn_count: int = 0
+
+
+class CollectStatus(BaseModel):
+    status: CollectRunStatus
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+    progress: Optional[CollectProgress] = None
+    summary: Optional[CollectSummary] = None
+    error: Optional[str] = None
+    last_collected_at: Optional[str] = None
