@@ -111,7 +111,14 @@ class TursoConnection:
 
 
 class _CursorAdapter:
-    """libsql cursor → sqlite3-style(Row 반환)."""
+    """libsql cursor → sqlite3-style(Row 반환).
+
+    주의 (지시 #13 fix):
+    - libsql_experimental 커서는 Python 이터레이터 프로토콜(__iter__/__next__) 지원이 **보장되지 않는다**.
+      → `__iter__` 를 `self.fetchall()` 로 구현(한 번에 모두 가져온 뒤 순회).
+    - description 이 None 이면 컬럼명 없이 dict 로 감쌀 수 없다. raw tuple 반환은 금지(pm 지시).
+      → 명시 RuntimeError. non-SELECT 쿼리는 fetchone/fetchall 호출 자체를 피하는 패턴이어야 함.
+    """
 
     def __init__(self, cursor):
         self._cur = cursor
@@ -124,8 +131,8 @@ class _CursorAdapter:
         return [self._wrap(r) for r in self._cur.fetchall()]
 
     def __iter__(self):
-        for r in self._cur:
-            yield self._wrap(r)
+        # libsql cursor 가 iterable 아닐 수 있으니 fetchall 기반.
+        return iter(self.fetchall())
 
     @property
     def lastrowid(self):
@@ -134,10 +141,13 @@ class _CursorAdapter:
     def _wrap(self, row):
         if row is None:
             return None
-        desc = getattr(self._cur, "description", None)
-        if not desc:
-            return row
+        desc = getattr(self._cur, "description", None) or []
         cols = [d[0] for d in desc]
+        if not cols:
+            raise RuntimeError(
+                "Turso 커서에 description 이 없어 row 를 dict 로 감쌀 수 없습니다 "
+                "(non-SELECT 결과를 fetch 하려는 호출 패턴일 수 있음)."
+            )
         return _Row(dict(zip(cols, row)))
 
 

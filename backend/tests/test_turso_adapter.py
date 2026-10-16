@@ -40,8 +40,14 @@ def test_split_sql_handles_multi_statements():
 # ---------- fake libsql_experimental ----------
 
 class _FakeCursor:
+    """실 libsql_experimental 커서를 **엄격하게** 흉내 (지시 #13):
+    - `__iter__` 는 **지원하지 않음** → 호출자가 iter 하면 TypeError
+    - 비-SELECT 쿼리의 description 은 **None**
+    - lastrowid 는 INSERT 시만 의미 있음
+    """
+
     def __init__(self):
-        self.description = None
+        self.description = None     # 기본 None, SELECT 쿼리에서만 세팅
         self._rows: list[tuple] = []
         self._pos = 0
         self.lastrowid = 42
@@ -49,9 +55,23 @@ class _FakeCursor:
 
     def execute(self, sql, params=()):
         self.executed_sql.append((sql, tuple(params) if params else ()))
-        if sql.lstrip().upper().startswith("SELECT"):
-            self.description = [("corp_code",), ("corp_name",)]
-            self._rows = [("00534729", "디티에스")]
+        s = sql.lstrip().upper()
+        if s.startswith("SELECT"):
+            if "FROM IPOS" in s and ("WHERE CORP_CODE" in s and "?" in sql):
+                self.description = [("corp_code",), ("corp_name",)]
+                self._rows = [("00534729", "디티에스")]
+            elif "FROM IPOS" in s:  # list_ipos 전체 조회
+                self.description = [("corp_code",), ("corp_name",)]
+                self._rows = [("00534729", "디티에스")]
+            elif "FROM SOURCES" in s:
+                self.description = [("corp_code",), ("doc_type",), ("rcept_no",), ("rcept_dt",), ("url",)]
+                self._rows = []
+            else:
+                self.description = [("x",)]
+                self._rows = []
+        else:
+            self.description = None   # INSERT/ALTER/PRAGMA 등
+            self._rows = []
         return self
 
     def executemany(self, sql, seq):
@@ -71,10 +91,7 @@ class _FakeCursor:
         self._pos = len(self._rows)
         return out
 
-    def __iter__(self):
-        while self._pos < len(self._rows):
-            yield self._rows[self._pos]
-            self._pos += 1
+    # ⚠ __iter__ 를 **정의하지 않는다** — 실 libsql 과 동일. 호출자가 iter 하면 TypeError.
 
 
 class _FakeInner:
@@ -185,6 +202,54 @@ def test_store_connect_uses_turso_when_env_set(fake_libsql):
     s.turso_auth_token = "faketoken"
     with store.connect() as conn:
         assert isinstance(conn, TursoConnection)
+
+
+def test_cursor_adapter_iter_uses_fetchall_not_native_iter(fake_libsql):
+    """회귀 (#13): libsql 커서가 __iter__ 를 지원하지 않아도 TursoConnection 이 iter 가능해야 함.
+    실제 Render 500 원인 — `for r in conn.execute(...)` 가 깨졌음.
+    """
+    s = get_settings()
+    s.turso_database_url = "libsql://fake.turso.io"
+    s.turso_auth_token = "faketoken"
+    with connect_turso() as conn:
+        cur = conn.execute("SELECT corp_code, corp_name FROM ipos")
+        # iter 는 fetchall 기반이므로 libsql 네이티브 iter 가 없어도 돌아감
+        rows = list(cur)
+        assert len(rows) == 1
+        assert rows[0]["corp_code"] == "00534729"
+
+
+def test_store_list_ipos_works_via_turso(fake_libsql, tmp_path):
+    """회귀 (#13): store.list_ipos() 가 Turso 커서 순회에서 터지지 않아야 함."""
+    s = get_settings()
+    s.turso_database_url = "libsql://fake.turso.io"
+    s.turso_auth_token = "faketoken"
+    from app import store
+    rows = store.list_ipos()
+    assert isinstance(rows, list)
+    # fake 는 ipos 1건·sources 0건·warnings 0건 — 예외 없이 응답
+    assert len(rows) == 1
+    assert rows[0]["corp_code"] == "00534729"
+
+
+def test_wrap_raises_when_description_is_none(fake_libsql):
+    """회귀 (#13): description 이 None 인 커서에서 fetchone 하면 raw tuple 반환 금지."""
+    s = get_settings()
+    s.turso_database_url = "libsql://fake.turso.io"
+    s.turso_auth_token = "faketoken"
+    with connect_turso() as conn:
+        # INSERT (description None) → fetchone 호출 시도. 결과 자체는 None 이므로 wrap 통과.
+        cur = conn.execute("INSERT INTO ipos (corp_code) VALUES (?)", ("test",))
+        assert cur.fetchone() is None   # 실제 INSERT 는 결과 없음 → None 안전
+
+        # 하지만 description None 인데 row 가 있는 비정상 상황을 흉내:
+        # fake 커서를 수동 조작해 row 를 넣어둠
+        cur._cur._rows = [("x",)]
+        cur._cur._pos = 0
+        cur._cur.description = None
+        import pytest
+        with pytest.raises(RuntimeError, match="description"):
+            cur.fetchone()
 
 
 def test_store_connect_does_not_fallback_on_turso_failure(monkeypatch):
