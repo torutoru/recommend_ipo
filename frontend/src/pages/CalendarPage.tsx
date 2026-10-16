@@ -251,7 +251,7 @@ function Legend() {
     { key: 'PASS-A', label: 'A 청약 유망' },
     { key: 'PASS-B', label: 'B 중립·주의' },
     { key: 'REJECT', label: 'REJECT 비추천' },
-    { key: 'PENDING', label: '판정 대기' },
+    { key: 'PENDING', label: '판정 대기 (흐리게)' },
   ]
   return (
     <div className="cal-legend" role="list" aria-label="범례">
