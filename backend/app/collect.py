@@ -49,7 +49,8 @@ DART_URL = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo="
 # 버전 bump 사례:
 #   v2 — 지시 #16 (티앤이코리아 확약·유통 regex 일반화, 두 표 합산)
 #   v3 — 지시 #19 (INCOMPLETE 상태 도입, "미공시 0점" 폐지)
-PARSER_VERSION = "v3"
+#   v4 — 지시 #24 (재파싱 시 종목 전체 이력 조회, core=None 보호, sources 보존)
+PARSER_VERSION = "v4"
 
 
 # ---------- 분류 ----------
@@ -259,7 +260,40 @@ def process_corp(
         if not raw_sources:
             log.append(f"[SKIP] {corp_code} {corp_name} — 분류 가능한 공시 없음(철회신고서 포함)")
             return {"corp_code": corp_code, "status": "SKIPPED", "warnings": []}
-        parsed_warnings.append("정본 공시(발행조건확정/증권신고서) 없음 — PENDING 유지")
+        # 지시 #24: 정본 공시(발행조건확정/증권신고서)가 없고 ISSUANCE_REPORT 만 있는 경우.
+        # 기존 레코드가 있으면 지표를 null 로 덮지 말고 그대로 보존.
+        # sources·warnings 는 업데이트해 두되 upsert_ipo 는 skip → parser_version 도 안 바뀜(다음 수집에서 또 체크).
+        with connect() as conn:
+            existing = conn.execute(
+                "SELECT corp_code FROM ipos WHERE corp_code = ? AND withdrawn_rcept_no IS NULL",
+                (corp_code,),
+            ).fetchone()
+            if existing is not None:
+                parsed_warnings.append(
+                    "정본 공시(발행조건확정/증권신고서) 없음 — 기존 지표 보존(ISSUANCE_REPORT 만으로는 덮어쓰지 않음)"
+                )
+                replace_sources(conn, corp_code, sources_payload)
+                replace_warnings(conn, corp_code, parsed_warnings)
+            else:
+                # 신규 종목인데 core 가 없음 — PENDING 메타만 저장(지표는 전부 null)
+                parsed_warnings.append("정본 공시(발행조건확정/증권신고서) 없음 — PENDING 유지")
+                upsert_ipo(conn, **row)
+                replace_sources(conn, corp_code, sources_payload)
+                replace_warnings(conn, corp_code, parsed_warnings)
+                return {
+                    "corp_code": corp_code,
+                    "corp_name": corp_name,
+                    "status": "collected",
+                    "warnings_count": len(parsed_warnings),
+                    "has_core_release": False,
+                }
+        return {
+            "corp_code": corp_code,
+            "corp_name": corp_name,
+            "status": "preserved",
+            "reason": "정본 공시 없음 — 기존 지표 보존",
+            "has_core_release": False,
+        }
     else:
         rcept_no = core["rcept_no"]
         xml_bytes: Optional[bytes] = None

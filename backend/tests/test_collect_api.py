@@ -363,6 +363,142 @@ def test_failures_reason_sanitized_of_secrets(client, monkeypatch, tmp_path):
     assert "C:/workspace" not in reason
 
 
+def test_stale_corp_full_history_prefers_final_release(client, monkeypatch, tmp_path):
+    """지시 #24: stale 재파싱 시 증분 범위에 ISSUANCE_REPORT 만 들어와도
+    corp_code 로 전체 이력을 다시 받아와 발행조건확정을 정본으로 선정하고 지표를 보존.
+    """
+    from app import collect as collect_mod, dart_client as _dc
+    monkeypatch.setattr(collect_mod, "CACHE_DIR", tmp_path / "cache")
+
+    final_rcept = "20260301000011"
+    issuance_rcept = "20261015000055"
+    final_disc = _disc(final_rcept, "[발행조건확정]증권신고서(지분증권)",
+                       "00534729", "디티에스", rcept_dt="20260301")
+    issuance_disc = _disc(issuance_rcept, "증권발행실적보고서",
+                          "00534729", "디티에스", rcept_dt="20261015")
+
+    # 1회차 — 발행조건확정만 보여 정상 수집
+    monkeypatch.setattr(_dc, "list_disclosures", lambda **kw: _list_resp([final_disc]))
+    monkeypatch.setattr(_dc, "download_document_zip",
+                        lambda *, rcept_no, timeout=20.0: _zip_bytes(_MIN_XML))
+    client.post("/api/collect")
+    _wait_done(client)
+    before = client.get("/api/ipos/00534729").json()
+    before_rate = before["indicators"]["competition_rate"]
+    assert before_rate is not None
+
+    # 2회차 — 증분엔 ISSUANCE_REPORT 만, corp_code 조회(full history)에는 [발행조건확정 + ISSUANCE_REPORT]
+    monkeypatch.setattr(collect_mod, "PARSER_VERSION", "forced-v99")
+
+    def fake_list(**kw):
+        if kw.get("corp_code"):
+            return _list_resp([final_disc, issuance_disc])
+        return _list_resp([issuance_disc])
+    monkeypatch.setattr(_dc, "list_disclosures", fake_list)
+
+    import shutil
+    if (tmp_path / "cache").exists():
+        shutil.rmtree(tmp_path / "cache")
+    downloaded: list[str] = []
+
+    def fake_download(*, rcept_no, timeout=20.0):
+        downloaded.append(rcept_no)
+        return _zip_bytes(_MIN_XML)
+    monkeypatch.setattr(_dc, "download_document_zip", fake_download)
+
+    client.post("/api/collect")
+    s2 = _wait_done(client)
+    assert s2["status"] == "SUCCEEDED"
+    # 발행조건확정이 정본으로 선정되어 다운로드됨 (ISSUANCE_REPORT 아님)
+    assert final_rcept in downloaded, f"다운로드 리스트: {downloaded}"
+
+    after = client.get("/api/ipos/00534729").json()
+    assert after["indicators"]["competition_rate"] == before_rate
+
+    # sources 에 두 문서가 모두 들어가 있어야 함
+    source_types = {sr["doc_type"] for sr in after["sources"]}
+    assert "ISSUANCE_REPORT" in source_types
+    assert "REGISTRATION_AMENDED" in source_types
+
+
+def test_core_none_with_existing_preserves_metrics(client, monkeypatch, tmp_path):
+    """지시 #24: 재파싱에서 ISSUANCE_REPORT 만 보이면(core=None) 다운로드 자체가 발생하지 않고 기존 지표 보존."""
+    from app import collect as collect_mod, dart_client as _dc
+    monkeypatch.setattr(collect_mod, "CACHE_DIR", tmp_path / "cache")
+
+    final_rcept = "20260301000011"
+    issuance_rcept = "20261015000055"
+    final_disc = _disc(final_rcept, "[발행조건확정]증권신고서(지분증권)",
+                       "00534729", "디티에스", rcept_dt="20260301")
+    issuance_disc = _disc(issuance_rcept, "증권발행실적보고서",
+                          "00534729", "디티에스", rcept_dt="20261015")
+
+    # 1회차 — 정상 수집
+    monkeypatch.setattr(_dc, "list_disclosures", lambda **kw: _list_resp([final_disc]))
+    monkeypatch.setattr(_dc, "download_document_zip",
+                        lambda *, rcept_no, timeout=20.0: _zip_bytes(_MIN_XML))
+    client.post("/api/collect")
+    _wait_done(client)
+    before = client.get("/api/ipos/00534729").json()
+    before_rate = before["indicators"]["competition_rate"]
+    assert before_rate is not None
+
+    # 2회차 — 증분도 full history 조회도 ISSUANCE_REPORT 만 → core=None
+    monkeypatch.setattr(collect_mod, "PARSER_VERSION", "forced-v99")
+    monkeypatch.setattr(_dc, "list_disclosures", lambda **kw: _list_resp([issuance_disc]))
+
+    def should_not_download(*, rcept_no, timeout=20.0):
+        raise AssertionError(f"core=None 분기면 다운로드가 발생하지 않아야 함: {rcept_no}")
+    monkeypatch.setattr(_dc, "download_document_zip", should_not_download)
+
+    import shutil
+    if (tmp_path / "cache").exists():
+        shutil.rmtree(tmp_path / "cache")
+
+    client.post("/api/collect")
+    s = _wait_done(client)
+    assert s["status"] == "SUCCEEDED"
+    # preserved → unchanged 로 계수(지시 #24)
+    assert s["summary"]["unchanged_count"] >= 1
+    assert s["summary"]["new_count"] == 0
+    assert s["summary"]["updated_count"] == 0
+
+    after = client.get("/api/ipos/00534729").json()
+    assert after["indicators"]["competition_rate"] == before_rate
+    # ISSUANCE_REPORT 가 sources 에 추가됐어야 함
+    source_types = {sr["doc_type"] for sr in after["sources"]}
+    assert "ISSUANCE_REPORT" in source_types
+
+
+def test_list_disclosures_passes_corp_code(monkeypatch):
+    """지시 #24: dart_client.list_disclosures(corp_code=...) 가 OpenDART 파라미터에 corp_code 를 그대로 전달,
+    기본 호출에는 포함되지 않는다.
+    """
+    import httpx as _httpx
+    from app import dart_client as _dc
+    from app.config import get_settings as _gs
+
+    _gs().dart_cert_key = "testkey"
+    captured: dict = {}
+
+    class _Resp:
+        status_code = 200
+        def raise_for_status(self): pass
+        def json(self): return {"status": "013", "list": []}
+
+    def fake_get(url, params=None, timeout=20.0):
+        captured["params"] = dict(params or {})
+        return _Resp()
+
+    monkeypatch.setattr(_httpx, "get", fake_get)
+
+    _dc.list_disclosures(bgn_de="20260101", end_de="20261001", corp_code="00534729")
+    assert captured["params"].get("corp_code") == "00534729"
+
+    _dc.list_disclosures(bgn_de="20260101", end_de="20261001")
+    assert "corp_code" not in captured["params"]
+
+
 def test_persistence_check_failed_marks_failed(client, monkeypatch):
     """지시 #14 — 수집은 성공했는데 DB 에 쓰기가 안 됐으면 FAILED.
 

@@ -47,11 +47,15 @@ def list_disclosures(
     last_reprt_at: str = "N",
     page_count: int = 100,
     page_no: int = 1,
+    corp_code: Optional[str] = None,
     timeout: float = _DEFAULT_TIMEOUT,
 ) -> dict:
-    """공시 검색. 기본은 C001(지분증권 증권신고서)."""
+    """공시 검색. 기본은 C001(지분증권 증권신고서).
+
+    corp_code 가 주어지면 해당 종목만 조회(지시 #24: 재파싱 때 종목 전체 이력 조회).
+    """
     _throttle()
-    params = {
+    params: dict = {
         "crtfc_key": _key(),
         "bgn_de": bgn_de,
         "end_de": end_de,
@@ -60,6 +64,8 @@ def list_disclosures(
         "page_count": page_count,
         "page_no": page_no,
     }
+    if corp_code:
+        params["corp_code"] = corp_code
     r = httpx.get(f"{DART_API}/list.json", params=params, timeout=timeout)
     r.raise_for_status()
     return r.json()

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import threading
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Any, Optional
 
 from . import collect as collect_mod
 from . import dart_client, store
@@ -104,7 +104,8 @@ def _date_range() -> tuple[str, str]:
     return bgn.strftime(fmt), end.strftime(fmt)
 
 
-def _fetch_list(bgn: str, end: str) -> list[dict]:
+def _fetch_list(bgn: str, end: str, corp_code: Optional[str] = None) -> list[dict]:
+    """OpenDART C001 공시 전체(pagination). corp_code 가 주어지면 그 종목만 조회(#24)."""
     all_items: list[dict] = []
     page_no = 1
     while True:
@@ -114,6 +115,7 @@ def _fetch_list(bgn: str, end: str) -> list[dict]:
             last_reprt_at="N",
             page_count=100,
             page_no=page_no,
+            corp_code=corp_code,
         )
         if resp.get("status") == "013":  # 조회 결과 없음
             break
@@ -127,6 +129,19 @@ def _fetch_list(bgn: str, end: str) -> list[dict]:
             break
         page_no += 1
     return all_items
+
+
+def _fetch_corp_history(corp_code: str) -> list[dict]:
+    """지시 #24: 종목의 전체 공시 이력(최근 full_history_days 일) 조회.
+
+    증분 범위 안 문서만 보면 발행조건확정이 과거라 빠지고 ISSUANCE_REPORT 만 보여서 지표가 null 로
+    바뀌는 사고 방지. corp_code 를 OpenDART list.json 에 넘겨 그 종목만 받아 온다.
+    """
+    s = get_settings()
+    end = now_kst()
+    bgn = end - timedelta(days=s.full_history_days)
+    fmt = "%Y%m%d"
+    return _fetch_list(bgn.strftime(fmt), end.strftime(fmt), corp_code=corp_code)
 
 
 def _run_safely() -> None:
@@ -183,29 +198,55 @@ def _run() -> None:
         try:
             new_items = [it for it in items if it["rcept_no"] not in known]
             is_stale = corp_code in stale_corp_codes
+            is_existing = corp_code in existing_corp_codes
             if not new_items and not is_stale:
                 # 완전히 새로운 공시가 없고 파서 버전도 최신 — unchanged
-                if corp_code in existing_corp_codes:
+                if is_existing:
                     summary.unchanged_count += 1
                 continue
             # is_stale 이면 new_items 가 비어도 process_corp 로 재파싱 진행 (버전 bump 시 자동 재적용)
 
-            # 철회신고서가 포함되면 종목 제외
-            if any(collect_mod.classify_report(x.get("report_nm", "")) == "WITHDRAWN" for x in items):
+            # 지시 #24: 재파싱/갱신 시 종목의 **전체 공시 이력**(최근 full_history_days 일)을 다시 받아 와서
+            # 정본(발행조건확정)이 증분 조회 범위 밖에 있어도 선정되게 한다.
+            # 신규 종목(is_existing=False) 은 증분 범위에서 발견된 공시만으로 처리(어차피 그게 전부).
+            items_for_process = items
+            if is_stale or is_existing:
+                try:
+                    full_items = _fetch_corp_history(corp_code)
+                except Exception as fe:
+                    # 종목별 조회 실패해도 치명적이지 않음 — 증분 items 로 fallback (경고로 보고)
+                    full_items = []
+                    _add_failure(
+                        corp_code, corp_name,
+                        f"종목 전체 이력 조회 실패 — {_sanitize_error(fe)} / 증분 범위로 fallback",
+                    )
+                if full_items:
+                    # IPO 후보 필터 통과한 공시만 사용(증분과 동일 기준)
+                    filtered_full = [it for it in full_items if collect_mod.is_ipo_candidate(it)]
+                    if filtered_full:
+                        items_for_process = sorted(
+                            filtered_full, key=lambda d: d.get("rcept_dt", "")
+                        )
+
+            # 철회신고서가 포함되면 종목 제외 (전체 이력 기준)
+            if any(collect_mod.classify_report(x.get("report_nm", "")) == "WITHDRAWN" for x in items_for_process):
                 with store.connect() as conn:
-                    for w in items:
+                    for w in items_for_process:
                         if collect_mod.classify_report(w.get("report_nm", "")) == "WITHDRAWN":
                             store.mark_withdrawn(conn, corp_code, w["rcept_no"])
                             break
                 summary.withdrawn_count += 1
                 continue
 
-            is_new = corp_code not in existing_corp_codes
-            r = collect_mod.process_corp(corp_code, items, log=[])
-            # 지시 #22: 다운로드/파싱 실패 → upsert skip 반환값으로 처리
+            is_new = not is_existing
+            r = collect_mod.process_corp(corp_code, items_for_process, log=[])
+            # 지시 #22/#24: 다운로드/파싱 실패·core 없음(기존 보존) → upsert skip 반환값으로 처리
             if r.get("status") in ("download_failed", "parse_empty"):
                 summary.failed_count += 1
                 _add_failure(corp_code, corp_name, r.get("reason") or r["status"])
+            elif r.get("status") == "preserved":
+                # 지시 #24: core 없음(ISSUANCE_REPORT 만) + 기존 레코드 있음 → 지표 보존 (unchanged 로 계수)
+                summary.unchanged_count += 1
             elif is_new:
                 summary.new_count += 1
             else:

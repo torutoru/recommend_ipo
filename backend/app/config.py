@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     # 증분 수집 (requirements 11장)
     incremental_overlap_days: int = 7     # 마지막 수집 시각 - N일부터 조회(정정 누락 방지)
     initial_days: int = 90                # 최초 실행 시 조회 범위
+    # 지시 #24: 재파싱·갱신 시 종목의 전체 공시 이력(최근 N일) 을 corp_code 로 다시 조회.
+    # 증분 조회 범위만으로는 발행조건확정이 과거라 빠지고 ISSUANCE_REPORT 만 보여 정본이 바뀌는 사고 방지.
+    full_history_days: int = 365
 
     # IPO 식별 — 회사명에 아래 키워드가 포함되면 스팩으로 간주해 제외 (지시 #15, CSV).
     # 사용자 결정으로 "기업인수목적" 외에 "스팩" 도 추가.
