@@ -344,3 +344,61 @@ def test_parse_accepts_future_listing_date():
     ).encode("utf-8")
     p = parse(xml, rcept_no="20261110000001", corp_name="테스트", rcept_dt="2026-11-10")
     assert p.listing_date == "2026-11-20"
+
+
+# ---------------- 지시 #25: 실적보고서 상장일(매매개시일) + 상장구분 ----------------
+
+def test_extract_listing_date_from_issuance_market_open_label():
+    """실적보고서 '상장일(매매개시일) 2026년 10월 22일 (예정)' 매칭."""
+    text = "<P>3. 상장일(매매개시일) 2026년 10월 22일 (예정)</P>"
+    assert extract_listing_date(text) == "2026-10-22"
+
+
+def test_extract_listing_date_from_issuance_market_open_no_predict():
+    """'(예정)' 없이도 매칭. (디티에스 실적보고서 형태)."""
+    text = "<P>3. 상장일(매매개시일) 2026년 10월 23일</P>"
+    assert extract_listing_date(text) == "2026-10-23"
+
+
+def test_extract_market_from_listing_class_kosdaq():
+    """실적보고서 기업개요 '상장구분 … 코스닥' → KOSDAQ."""
+    text = (
+        "<TABLE><TR><TD>상장구분</TD><TD>기업규모</TD><TD>업종구분</TD></TR>"
+        "<TR><TD>코스닥</TD><TD>중소기업</TD><TD>생명과학</TD></TR></TABLE>"
+    )
+    assert extract_market(text) == "KOSDAQ"
+
+
+def test_extract_market_from_listing_class_kospi():
+    text = "<TR><TD>상장구분</TD><TD>유가증권</TD></TR>"
+    assert extract_market(text) == "KOSPI"
+
+
+def test_extract_market_from_listing_class_konex():
+    text = "<TR><TD>상장구분</TD><TD>코넥스</TD></TR>"
+    assert extract_market(text) == "KONEX"
+
+
+def test_extract_market_listing_class_takes_priority_or_matches_narrative():
+    """상장구분 + 서술형이 동일 시장을 가리키면 그 시장. 상충하면 null."""
+    # 같은 시장 — 단일 결과
+    text_same = (
+        "<P>상장구분 코스닥</P>"
+        "<P>본 공모 주식은 코스닥시장에 신규상장될 예정입니다.</P>"
+    )
+    assert extract_market(text_same) == "KOSDAQ"
+    # 상충 — 단일 명시 패턴이 코스닥·유가증권 둘 다 → 둘 다 hit → None
+    text_conflict = (
+        "<P>상장구분 코스닥</P>"
+        "<P>본 공모 주식은 유가증권시장에 신규상장될 예정입니다.</P>"
+    )
+    assert extract_market(text_conflict) is None
+
+
+def test_issuance_report_sample_fixture_parses_both_fields():
+    """pm 이 준 fixture — 상장일(매매개시일)·상장구분 둘 다 추출."""
+    xml_path = FIXTURE_DIR / "issuance_report_sample.xml"
+    xml_bytes = xml_path.read_bytes()
+    text = xml_bytes.decode("utf-8")
+    assert extract_listing_date(text) == "2026-10-22"
+    assert extract_market(text) == "KOSDAQ"

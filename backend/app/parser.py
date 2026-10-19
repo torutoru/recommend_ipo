@@ -302,7 +302,7 @@ def extract_tradable_ratio(xml: str) -> Optional[float]:
     return None
 
 
-# ---------- 시장 구분 (v0.4) ----------
+# ---------- 시장 구분 (v0.4 / 지시 #25) ----------
 
 _MARKET_NAMES: list[tuple[Market, str]] = [
     ("KOSDAQ", "코스닥"),
@@ -310,7 +310,21 @@ _MARKET_NAMES: list[tuple[Market, str]] = [
     ("KONEX",  "코넥스"),
 ]
 
-# 1순위: 이번 공모의 상장 대상 시장을 선언하는 서술형만 매칭.
+# 지시 #25: 증권발행실적보고서 기업개요 "상장구분" 칸의 값을 **최우선** 명시 신호로 사용.
+# 예: "상장구분 기업규모 업종구분 / 코스닥 중소기업 …" 또는 "상장구분 … 코스닥".
+# "코스피" 는 "유가증권" 과 같은 KOSPI 로 매핑.
+_LISTING_CLASS_TO_MARKET: dict[str, Market] = {
+    "코스닥": "KOSDAQ",
+    "유가증권": "KOSPI",
+    "코스피":  "KOSPI",
+    "코넥스": "KONEX",
+}
+_RE_MARKET_LISTING_CLASS = re.compile(
+    r"상장\s*구분[^\n]{0,200}?(코스닥|유가증권|코스피|코넥스)"
+)
+
+
+# 1순위-b: 이번 공모의 상장 대상 시장을 선언하는 서술형.
 # 보수적으로 좁게 — "○○시장에 (신규)상장" 서술만 인정.
 #   비매치: "코스닥시장 상장규정", "코넥스시장 상장예정법인", "상장일부터"
 # 매치 뒤 즉시 "법인/주식/기업/회사/일" 처럼 명사가 이어지면 공모 선언이 아니므로 lookahead 로 제외.
@@ -329,16 +343,22 @@ def _explicit_market_patterns() -> list[tuple[Market, re.Pattern]]:
 def extract_market(xml: str, *, dominance_ratio: float = 3.0) -> Optional[Market]:
     """시장 구분 판별. 명시 패턴 1순위, 빈도 fallback(3배 이상 지배적일 때만).
 
-    - 명시 패턴(예: "○○시장에 상장")이 하나의 시장에서만 발견되면 그 시장.
-    - 둘 이상의 서로 다른 시장에서 명시 패턴이 발견되면 null (추정 금지).
-    - 명시 패턴이 없으면 전체 "○○시장" 등장 빈도로 fallback — 단, **1위가 2위의 dominance_ratio 배 이상**일 때만 채택.
-    - 그 외(동률·근소 차이·전혀 없음) → None.
+    1순위 명시 패턴은 두 가지:
+    - (a) 지시 #25: "상장구분 … (코스닥|유가증권|코스피|코넥스)" (실적보고서·공시명세 테이블).
+    - (b) "○○시장에 (신규)상장" 서술 (투자설명서·발행조건확정 본문).
 
-    실측(디티에스 20261012000308): 코스닥 73 / 유가증권 2 / 코넥스 6
-    → 명시 패턴 매칭(코스닥시장 상장규정 등) + 빈도 비율 ~11:1 로 KOSDAQ.
+    둘 중 어느 하나라도 **단일 시장**을 가리키면 그 시장. 서로 다른 시장을 가리키면 상충(None).
+    1순위가 비면 빈도 fallback 으로 — 단 **1위가 2위의 dominance_ratio 배 이상**일 때만 채택.
     """
-    # 1) 명시 패턴
+    # 1) 명시 패턴 (상장구분 + 서술형)
     hit: set[Market] = set()
+    text = _strip_tags(xml)
+    m_class = _RE_MARKET_LISTING_CLASS.search(text)
+    if m_class:
+        kw = m_class.group(1)
+        mapped = _LISTING_CLASS_TO_MARKET.get(kw)
+        if mapped:
+            hit.add(mapped)
     for market, pat in _explicit_market_patterns():
         if pat.search(xml):
             hit.add(market)
@@ -361,17 +381,25 @@ def extract_market(xml: str, *, dominance_ratio: float = 3.0) -> Optional[Market
     return None
 
 
-# ---------- 상장일 (v0.4) ----------
+# ---------- 상장일 (v0.4 / 지시 #25) ----------
 
 # 명시적 "상장(예정)일" 선언만 매칭한다. "상장일부터 6개월" 같은 상대 참조는 매칭하지 않는다.
+# 지시 #25: 증권발행실적보고서는 "상장일(매매개시일) YYYY년 M월 D일 (예정)" 형식.
+# "상장일" 매치 뒤 선택적 "(매매개시일)" 를 흡수해야 날짜가 바로 뒤에서 잡힌다.
 _RE_LISTING_DATE = re.compile(
-    r"상장\s*(?:예정)?\s*일(?:자)?\s*[:：은는]?\s*"
+    r"상장\s*"
+    r"(?:"
+    r"(?:예정)?\s*일(?:자)?\s*(?:\(\s*매매개시일\s*\))?"   # "상장일[자][(매매개시일)?]"
+    r"|"
+    r"\(\s*매매개시일\s*\)"                                 # "상장(매매개시일)" 단독
+    r")"
+    r"\s*[:：은는]?\s*"
     r"(\d{4})\s*[-\.년]\s*(\d{1,2})\s*[-\.월]\s*(\d{1,2})\s*일?"
 )
 
 
 def extract_listing_date(xml: str) -> Optional[str]:
-    """원문에 "상장(예정)일 YYYY-MM-DD" 명시가 있을 때만 반환. 추정 금지.
+    """원문에 "상장(예정)일 YYYY-MM-DD" 또는 "상장일(매매개시일) YYYY-MM-DD" 명시가 있을 때만 반환. 추정 금지.
 
     주의: 과거 상장일 참조(예: 모회사 상장일, 기준 시점)가 섞여 들어오므로
     호출자(parse)가 rcept_dt / subscription_end 와 비교해 미래 날짜만 수용한다.

@@ -50,7 +50,8 @@ DART_URL = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo="
 #   v2 — 지시 #16 (티앤이코리아 확약·유통 regex 일반화, 두 표 합산)
 #   v3 — 지시 #19 (INCOMPLETE 상태 도입, "미공시 0점" 폐지)
 #   v4 — 지시 #24 (재파싱 시 종목 전체 이력 조회, core=None 보호, sources 보존)
-PARSER_VERSION = "v4"
+#   v5 — 지시 #25 (실적보고서 상장일(매매개시일)·상장구분 파싱 + ISSUANCE_REPORT 보강)
+PARSER_VERSION = "v5"
 
 
 # ---------- 분류 ----------
@@ -372,6 +373,16 @@ def process_corp(
         )
         parsed_warnings.extend(parsed.warnings)
 
+        # 지시 #25: ISSUANCE_REPORT 로 상장일·시장 보강.
+        # - 발행조건확정 XML 에서 listing_date 또는 market 이 null 이고
+        # - raw_sources 에 ISSUANCE_REPORT 가 있으면
+        # - 가장 최근 실적보고서를 다운로드·파싱해 두 값만 보완(경쟁률·가격 등 기존 지표는 건드리지 않음).
+        if row.get("listing_date") is None or row.get("market") is None:
+            _supplement_from_issuance_report(
+                corp_code=corp_code, corp_name=corp_name, core_rcept=rcept_no,
+                raw_sources=raw_sources, row=row, parsed_warnings=parsed_warnings,
+            )
+
     # 저장
     with connect() as conn:
         upsert_ipo(conn, **row)
@@ -385,6 +396,61 @@ def process_corp(
         "warnings_count": len(parsed_warnings),
         "has_core_release": core is not None,
     }
+
+
+def _supplement_from_issuance_report(
+    *,
+    corp_code: str,
+    corp_name: str,
+    core_rcept: str,
+    raw_sources: list[dict],
+    row: dict,
+    parsed_warnings: list[str],
+) -> None:
+    """지시 #25: ISSUANCE_REPORT 로 listing_date / market 보강.
+
+    발행조건확정에서 못 뽑은 값만 채운다. 실패는 경고로만 남기고 진행.
+    """
+    issuance = [s for s in raw_sources if s.get("doc_type") == "ISSUANCE_REPORT"]
+    if not issuance:
+        return
+    # 가장 최근 실적보고서 선택
+    latest = max(issuance, key=lambda s: s["disclosure"].get("rcept_dt", ""))
+    issue_rcept = latest["disclosure"]["rcept_no"]
+    if issue_rcept == core_rcept:
+        # 정본이 이미 실적보고서인 특수 케이스 — 중복 파싱 skip
+        return
+    try:
+        zip_bytes = get_document_zip_cached(issue_rcept)
+        xml_bytes = extract_single_xml(zip_bytes)
+    except Exception as e:
+        parsed_warnings.append(
+            f"ISSUANCE_REPORT({issue_rcept}) 보강 다운로드/압축해제 실패: {type(e).__name__}: {e}"
+        )
+        return
+    try:
+        issue_parsed = parse(
+            xml_bytes,
+            rcept_no=issue_rcept,
+            corp_name=corp_name,
+            rcept_dt=_dash_date(latest["disclosure"].get("rcept_dt", "")),
+        )
+    except Exception as e:
+        parsed_warnings.append(
+            f"ISSUANCE_REPORT({issue_rcept}) 보강 파싱 실패: {type(e).__name__}: {e}"
+        )
+        return
+    changed: list[str] = []
+    if row.get("listing_date") is None and issue_parsed.listing_date:
+        row["listing_date"] = issue_parsed.listing_date
+        changed.append(f"listing_date={issue_parsed.listing_date}")
+    if row.get("market") is None and issue_parsed.market:
+        row["market"] = issue_parsed.market
+        changed.append(f"market={issue_parsed.market}")
+    if changed:
+        parsed_warnings.append(
+            f"ISSUANCE_REPORT({issue_rcept}) 보강 적용 — {', '.join(changed)}"
+        )
 
 
 def _dash_date(d: str) -> str:

@@ -470,6 +470,114 @@ def test_core_none_with_existing_preserves_metrics(client, monkeypatch, tmp_path
     assert "ISSUANCE_REPORT" in source_types
 
 
+def test_issuance_report_supplements_listing_date_and_market(client, monkeypatch, tmp_path):
+    """지시 #25: 발행조건확정에 listing_date/market 가 없고 ISSUANCE_REPORT 가 함께 있으면
+    실적보고서를 추가 다운로드·파싱해 두 값을 보강(기존 지표는 유지)."""
+    from app import collect as collect_mod, dart_client as _dc
+    monkeypatch.setattr(collect_mod, "CACHE_DIR", tmp_path / "cache")
+
+    final_rcept = "20261007000327"
+    issuance_rcept = "20261015000326"
+    final_disc = _disc(final_rcept, "[발행조건확정]증권신고서(지분증권)",
+                       "01749559", "엠에스바이오", rcept_dt="20261007")
+    issuance_disc = _disc(issuance_rcept, "증권발행실적보고서",
+                          "01749559", "엠에스바이오", rcept_dt="20261015")
+
+    # 발행조건확정 XML — 밴드·확정가·경쟁률 등은 있지만 상장일·시장 없음(의도적)
+    final_xml = """<?xml version="1.0" encoding="utf-8"?>
+<DOC>
+<P>공모희망가액 범위(10,000원 ~ 12,000원)</P>
+<P>확정공모가액 12,000원</P>
+<P>본 공시 접수일 2026-10-07</P>
+<P>청약기간: 2026년 10월 13일 ~ 2026년 10월 14일</P>
+<TR><TD>경쟁률</TD><TD>1</TD><TD>2</TD><TD>3</TD><TD>4</TD><TD>5</TD><TD>6</TD><TD>7</TD><TD>8</TD><TD>9</TD><TD>1096.56</TD></TR>
+<TR><TD>수량</TD><TD>1</TD><TD>2</TD><TD>3</TD><TD>4</TD><TD>5</TD><TD>6</TD><TD>7</TD><TD>8</TD><TD>9</TD><TD>500000</TD></TR>
+</DOC>
+"""
+    # 실적보고서 XML — 상장일(매매개시일)·상장구분만
+    issuance_xml = """<?xml version="1.0" encoding="utf-8"?>
+<DOC>
+<TABLE>
+<TR><TD>상장구분</TD><TD>기업규모</TD><TD>업종구분</TD></TR>
+<TR><TD>코스닥</TD><TD>중소기업</TD><TD>생명과학</TD></TR>
+</TABLE>
+<P>3. 상장일(매매개시일) 2026년 10월 22일 (예정)</P>
+</DOC>
+"""
+
+    def fake_list(**kw):
+        return _list_resp([final_disc, issuance_disc])
+
+    def fake_download(*, rcept_no, timeout=20.0):
+        if rcept_no == final_rcept:
+            return _zip_bytes(final_xml)
+        if rcept_no == issuance_rcept:
+            return _zip_bytes(issuance_xml)
+        raise AssertionError(f"예상치 못한 다운로드: {rcept_no}")
+
+    monkeypatch.setattr(_dc, "list_disclosures", fake_list)
+    monkeypatch.setattr(_dc, "download_document_zip", fake_download)
+
+    client.post("/api/collect")
+    s = _wait_done(client)
+    assert s["status"] == "SUCCEEDED"
+    assert s["summary"]["failed_count"] == 0
+
+    detail = client.get("/api/ipos/01749559").json()
+    assert detail["market"] == "KOSDAQ"
+    assert detail["listing_date"] == "2026-10-22"
+    # 경쟁률은 발행조건확정에서 그대로 유지되어야 함(실적보고서가 덮어쓰지 않음)
+    assert detail["indicators"]["competition_rate"] == 1096.56
+    # report_rcept_no 는 발행조건확정의 접수번호(보강이 바꾸지 않음)
+    assert detail["indicators"]["report_rcept_no"] == final_rcept
+
+
+def test_issuance_supplement_skipped_when_both_already_present(client, monkeypatch, tmp_path):
+    """지시 #25: 발행조건확정에 이미 listing_date·market 둘 다 있으면 실적보고서 다운로드 안 함(비용 절감)."""
+    from app import collect as collect_mod, dart_client as _dc
+    monkeypatch.setattr(collect_mod, "CACHE_DIR", tmp_path / "cache")
+
+    final_rcept = "20261012000308"
+    issuance_rcept = "20261024000099"
+    final_disc = _disc(final_rcept, "[발행조건확정]증권신고서(지분증권)",
+                       "00534729", "디티에스", rcept_dt="20261012")
+    issuance_disc = _disc(issuance_rcept, "증권발행실적보고서",
+                          "00534729", "디티에스", rcept_dt="20261024")
+
+    monkeypatch.setattr(_dc, "list_disclosures", lambda **kw: _list_resp([final_disc, issuance_disc]))
+
+    # 발행조건확정 XML 에 상장일·시장 모두 포함되게 — 보강이 호출되면 안 됨
+    full_xml = """<?xml version="1.0" encoding="utf-8"?>
+<DOC>
+<P>공모희망가액 범위(10,000원 ~ 12,000원)</P>
+<P>확정공모가액 12,000원</P>
+<P>본 공시 접수일 2026-10-12</P>
+<P>청약기간: 2026년 10월 20일 ~ 2026년 10월 21일</P>
+<P>본 공모 주식은 코스닥시장에 신규상장될 예정입니다.</P>
+<P>상장예정일 2026년 10월 30일로 결정되었습니다.</P>
+<TR><TD>경쟁률</TD><TD>1</TD><TD>2</TD><TD>3</TD><TD>4</TD><TD>5</TD><TD>6</TD><TD>7</TD><TD>8</TD><TD>9</TD><TD>983.98</TD></TR>
+<TR><TD>수량</TD><TD>1</TD><TD>2</TD><TD>3</TD><TD>4</TD><TD>5</TD><TD>6</TD><TD>7</TD><TD>8</TD><TD>9</TD><TD>500000</TD></TR>
+</DOC>
+"""
+    downloads: list[str] = []
+
+    def fake_download(*, rcept_no, timeout=20.0):
+        downloads.append(rcept_no)
+        if rcept_no == final_rcept:
+            return _zip_bytes(full_xml)
+        raise AssertionError(f"보강이 skip 되어야 하는데 ISSUANCE_REPORT 다운로드가 호출됨: {rcept_no}")
+
+    monkeypatch.setattr(_dc, "download_document_zip", fake_download)
+
+    client.post("/api/collect")
+    s = _wait_done(client)
+    assert s["status"] == "SUCCEEDED"
+
+    # 발행조건확정만 다운로드되고 ISSUANCE_REPORT 는 호출되지 않음
+    assert final_rcept in downloads
+    assert issuance_rcept not in downloads
+
+
 def test_list_disclosures_passes_corp_code(monkeypatch):
     """지시 #24: dart_client.list_disclosures(corp_code=...) 가 OpenDART 파라미터에 corp_code 를 그대로 전달,
     기본 호출에는 포함되지 않는다.
