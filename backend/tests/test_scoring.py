@@ -306,16 +306,28 @@ def test_flow_otherwise(cfg):
 
 # ---------------------- 미공시 (0점 + reasons) ----------------------
 
-def test_null_lockup_zero_point_with_reason(cfg):
+def test_null_lockup_marks_incomplete(cfg):
+    """v1.0 (지시 #19): lockup null 이면 0점이 아니라 INCOMPLETE."""
     r = evaluate(_ind(lockup_ratio=None), cfg)
-    assert r.scores.lockup == 0
-    assert any("확약" in line and "미공시" in line for line in r.reasons)
+    assert r.status == "INCOMPLETE"
+    assert r.scores.lockup is None
+    assert r.scores.total is None
+    assert any("확약" in line and ("확인 필요" in line or "판정 보류" in line) for line in r.reasons)
 
 
-def test_null_flow_pair_zero_with_reason(cfg):
+def test_null_flow_pair_marks_incomplete(cfg):
+    """v1.0: tradable null → INCOMPLETE (0점 아님)."""
     r = evaluate(_ind(tradable_ratio=None, old_share_ratio=None), cfg)
+    assert r.status == "INCOMPLETE"
+    assert r.scores.flow is None
+    assert any("유통가능" in line and ("확인 필요" in line or "판정 보류" in line) for line in r.reasons)
+
+
+def test_tradable_above_35_with_old_null_still_proceeds(cfg):
+    """v1.0: tradable > 35 이면 flow=0 로 확정되므로 old_share null 이어도 PASS/REJECT 진행."""
+    r = evaluate(_ind(tradable_ratio=40.0, old_share_ratio=None), cfg)
+    assert r.status in ("PASS", "REJECT")
     assert r.scores.flow == 0
-    assert any("유통가능" in line and "미공시" in line for line in r.reasons)
 
 
 # ---------------------- 증거금 v0.3 ----------------------

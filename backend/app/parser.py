@@ -74,8 +74,9 @@ def _to_float(s: str) -> Optional[float]:
 
 # ---------- 밴드 (공모희망가액) ----------
 
+# 두 패턴을 OR: 괄호형(디티에스) 또는 조사형(다비오 "공모희망가액인 12,300원 ~ 16,600원")
 _RE_BAND = re.compile(
-    r"공모희망가액[^(]*\(\s*([0-9,]+)\s*원\s*~\s*([0-9,]+)\s*원\s*\)"
+    r"공모희망가액[^0-9가-힣]{0,10}(?:인|범위|\(|\s)*\s*([0-9,]+)\s*원\s*~\s*([0-9,]+)\s*원"
 )
 
 
@@ -219,30 +220,42 @@ def extract_subscription_dates(xml: str) -> tuple[Optional[str], Optional[str]]:
 # - 확약 비율(applied) = (전체 - 미확약) / 전체 × 100
 # 각 TR 안의 셀은 (건수, 수량, 신청가격) × N기관 → 큰 수(>=1,000,000)만 수량으로 간주해 합산.
 
+# 섹션 끝: (라)/(마)/(바) 또는 "USERMARK=\"0X" + 색상 코드 SPAN(다른 섹션 시작). 티앤이코리아는 "B 0X1814FF" 로 다름.
+# → USERMARK 패턴을 색상 코드 전반으로 완화. 더 안전하게 다음 "(…)" 소제목 패턴도 추가.
 _RE_LOCKUP_SECTION = re.compile(
-    r"\(다\)\s*의무보유확약기간별\s*수요예측\s*참여내역(.*?)(?=\(라\)|\(마\)|\(바\)|<SPAN\s+USERMARK=\"0X0000FF\">)",
+    r"\(다\)\s*의무보유확약기간별\s*수요예측\s*참여내역(.*?)"
+    r"(?=\(라\)|\(마\)|\(바\)|<SPAN\s+USERMARK=\"[^\"]*0X[0-9A-Fa-f]+\"[^>]*>\s*\([가-힣]\))",
     re.DOTALL,
 )
 
 
 def _sum_large_cells_in_row(section: str, label: str, min_value: int = 1_000_000) -> Optional[int]:
-    """섹션 안에서 첫 셀 텍스트가 label 과 같은 TR 을 찾아, min_value 이상의 숫자 셀을 모두 합산."""
+    """섹션 안에서 첫 셀 텍스트가 label 과 같은 TR 들의 큰 수(>=min_value) 를 **모두** 합산.
+
+    티앤이코리아처럼 (다) 섹션이 **두 표로 분할**(국내 + 외국)된 경우 두 표의 "미확약"/"합계" TR
+    모두를 더해야 한다. 디티에스처럼 1개 표인 경우도 동일하게 동작.
+    라벨 매칭은 "번호 접두" 허용: "1. 미확약" / "미확약" / "미 확약" 전부 매치.
+    """
+    import re as _re
+    norm_pat = _re.compile(r"^\s*(?:\d+\.\s*)?(.+?)\s*$")
+
+    total = 0
+    found_any = False
     for tr in _RE_ROW.finditer(section):
         cells = [_strip_tags(c) for c in _RE_CELL.findall(tr.group("body"))]
-        if not cells or cells[0] != label:
+        if not cells:
             continue
-        total = 0
-        found_any = False
+        first = cells[0]
+        m = norm_pat.match(first)
+        if not m or m.group(1).replace(" ", "") != label.replace(" ", ""):
+            continue
         for c in cells[1:]:
             n = _to_int(c)
-            if n is None:
+            if n is None or n < min_value:
                 continue
-            if n >= min_value:
-                total += n
-                found_any = True
-        if found_any:
-            return total
-    return None
+            total += n
+            found_any = True
+    return total if found_any else None
 
 
 def extract_lockup(xml: str) -> tuple[Optional[float], Optional[Literal["allocated", "applied"]]]:
@@ -263,9 +276,11 @@ def extract_lockup(xml: str) -> tuple[Optional[float], Optional[Literal["allocat
 
 # ---------- 유통가능 비율 (v0.5 — 서술형) ----------
 
-# 예(디티에스): "약 15.15%에 해당하는 2,250,787주는 상장 직후 유통가능물량입니다"
+# 예1(디티에스): "약 15.15%에 해당하는 2,250,787주는 상장 직후 유통가능물량입니다"
+# 예2(티앤이코리아): "11,357,737주 중 31.27%에 해당하는 3,551,856주는 상장직후 유통가능 물량에 해당됩니다"
+# → "약" 선택, "유통가능" 뒤 공백 허용.
 _RE_TRADABLE_RATIO_NARRATIVE = re.compile(
-    r"약\s*([\d.]+)\s*%\s*에\s*해당하는\s*[\d,]+\s*주[^<]{0,40}유통가능물량"
+    r"(?:약\s*)?([\d.]+)\s*%\s*에\s*해당하는\s*[\d,]+\s*주[^<]{0,40}유통가능\s*물량"
 )
 
 # fallback: 테이블 "유통가능물량(A-B)" 라벨 셀 뒤 300자 이내에서 "N.NN%" 매치 (첫 매치).
@@ -372,9 +387,13 @@ def extract_listing_date(xml: str) -> Optional[str]:
 
 _RE_NEW_SHARES = re.compile(r"신주\s*모집[^0-9]{0,20}([0-9,]+)\s*주")
 _RE_OLD_SHARES = re.compile(r"구주\s*매출[^0-9]{0,20}([0-9,]+)\s*주")
+# 라벨 바로 뒤의 선언형 숫자만 매치. 설명문 안 "공모주식수는..." 같은 조사형은 lookahead 로 차단.
+# 다비오("모집 또는 매출주식의 수" / "기명식 보통주 1,000,000주") 패턴도 추가.
 _RE_TOTAL_OFFERING = re.compile(
-    r"(?:모집\(매출\)\s*주식수|총\s*공모\s*주식\s*수|공모\s*주식\s*총수|공모주식수)"
-    r"[^0-9]{0,20}([0-9,]+)\s*주"
+    r"(?:모집\(매출\)\s*주식수|총\s*공모\s*주식\s*수|공모\s*주식\s*총수)"
+    r"[^0-9]{0,10}([0-9,]+)\s*주"
+    r"|공모주식수(?!\s*(?:는|을|를|이|가|의|에))\s*[:：]?\s*([0-9,]+)\s*주"
+    r"|모집\s*(?:또는|및)\s*매출주식의\s*수[^0-9]{0,30}(?:기명식\s*보통주\s*)?([0-9,]+)\s*주"
 )
 # v0.6 공모 금액 (원문 "모집(매출) 총액" 명시가 있을 때만)
 _RE_OFFERING_AMOUNT = re.compile(
@@ -403,7 +422,11 @@ def extract_offering_counts(xml: str) -> dict:
         old = _to_int(mo.group(1))
     mt = _RE_TOTAL_OFFERING.search(text)
     if mt:
-        total = _to_int(mt.group(1))
+        # alternation 중 매치된 group 선택 (group 1/2/3 OR)
+        for g in mt.groups():
+            if g is not None:
+                total = _to_int(g)
+                break
 
     # 보완: new+old 가 있고 total 없으면 합산, 반대도 가능
     if total is None and new is not None and old is not None:
@@ -508,15 +531,38 @@ def parse(
     else:
         out.warnings.append("모집(매출) 주식 수 구성을 찾지 못함")
 
-    # 공모 금액 (v0.6): 원문 "모집(매출) 총액" 우선, 없으면 total_offering_count × final_price, 둘 다 없으면 null
+    # 공모 금액 (v0.6 + 다비오 수정):
+    # (1) 원문 "모집(매출) 총액" 매치 → 타당성 검사(수량×밴드하단의 min_ratio, 또는 min_absolute 이상)
+    # (2) 거부 또는 미매치 시 total_offering_count × final_price
+    # (3) 둘 다 없으면 null
+    from .config import get_settings as _get_settings
+    _s = _get_settings()
     explicit_amount = extract_offering_amount_krw(xml)
+    if explicit_amount is not None:
+        min_abs = _s.offering_amount_min_absolute_krw
+        min_rel = None
+        if out.total_offering_count is not None and out.band_low is not None:
+            min_rel = int(out.total_offering_count * out.band_low * _s.offering_amount_min_ratio_vs_band_low)
+        min_required = max(min_abs, min_rel or 0)
+        if explicit_amount < min_required:
+            out.warnings.append(
+                f"원문 매치 공모 금액 {explicit_amount:,}원 이 타당성 기준({min_required:,}원) 미달 "
+                f"— 명시값 거부, fallback 산출로 전환"
+            )
+            explicit_amount = None
     if explicit_amount is not None:
         out.offering_amount_krw = explicit_amount
     elif out.total_offering_count is not None and out.final_price is not None:
         out.offering_amount_krw = out.total_offering_count * out.final_price
+    elif out.total_offering_count is not None and out.band_low is not None:
+        # 확정가 전 단계라도 밴드 하단으로 하한 추정 — pm 가산 기준(≥1000억) 판단은 **하한** 쪽이 보수적
+        out.offering_amount_krw = out.total_offering_count * out.band_low
+        out.warnings.append(
+            "공모 금액: 확정가 전이라 band_low × total_offering_count 로 보수 추정 (가산 판단은 하한 기준)"
+        )
     else:
         out.offering_amount_krw = None
-        out.warnings.append("공모 금액(모집 총액)을 산출하지 못함 — 원문 명시도, 총수량·확정가도 없음")
+        out.warnings.append("공모 금액(모집 총액)을 산출하지 못함 — 원문 명시도, 총수량·확정가/밴드도 없음")
 
     # 유통가능 비율 (v0.5 — 서술형 추출)
     out.tradable_ratio = extract_tradable_ratio(xml)

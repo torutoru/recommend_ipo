@@ -51,7 +51,7 @@ recommend_ipo/
 
 ## 개발 시 지켜야 할 것
 - **Python**: 3.12가 `C:\Users\CHO\AppData\Local\Programs\Python\Python312\python.exe`에 설치되어 있다. PATH에서 `python`을 부르면 Microsoft Store 스텁이 잡힐 수 있으니, 이 경로로 `backend/.venv`를 만들고 venv 안의 python을 쓴다.
-- **배포 대상**: frontend는 Netlify(`/api/*`를 Render로 프록시), backend는 Render Free(슬립, 휘발성 디스크), DB는 Turso. 로컬은 SQLite 파일을 쓴다. 상세는 `requirements.md` 12장에 있다. 계정 생성, 배포, git push는 사용자가 한다.
+- **배포 대상**: frontend는 Netlify(`/api/*`를 Render로 프록시), backend는 Render Free(슬립, 휘발성 디스크), DB는 Turso(HTTP pipeline API)다. 운영(Render)은 운영 Turso DB, 로컬 개발은 개발용 Turso DB(`backend/.env.local`)를 쓴다. 테스트는 항상 임시 SQLite를 쓰고 Turso에 붙지 않는다. 스키마 변경은 마이그레이션(ADD COLUMN)으로만 하고, DROP·삭제는 하지 않는다. 상세는 `requirements.md` 12장에 있다. 계정 생성과 배포 설정은 사용자가 하고, push는 pm이 검증 후 한다.
 - **스택과 포트**: backend는 FastAPI, `:8000`. frontend는 Vite, `:5173`이며 `/api` 요청을 8000으로 proxy한다. backend는 CORS로 5173을 허용한다.
 - **MVP 범위**: 종목 목록, 상세(지표·점수·등급·근거·원문 링크), 균등 배정 최소 증거금. 알림, 로그인, 백테스트, 예상 수익 예측은 제외한다.
 - **판정 상태**: 수요예측 결과(경쟁률·공모가 위치) 미공시면 `PENDING`, 총점 50 이상 `PASS`(S≥80·A≥65·B), 50 미만 `REJECT`(점수는 있음). 하드 필터 없음. 상세에는 가이드 2장 체크리스트(만족/불만족/미공시/정보)를 함께 준다.

@@ -150,14 +150,18 @@ def _run() -> None:
     disclosures = _fetch_list(bgn, end)
 
     # 기존 접수번호 집합 — 신규 판별
+    # parser_version 이 현재 코드 버전과 다른 종목은 "변화 없음" 분기에서 빼내 재파싱 (지시 #16)
     with store.connect() as conn:
         known = store.known_rcept_nos(conn)
         run_id = store.start_collect_run(conn, days=(datetime.strptime(end, "%Y%m%d") - datetime.strptime(bgn, "%Y%m%d")).days)
-        existing_corp_codes = {
-            r["corp_code"] for r in conn.execute(
-                "SELECT corp_code FROM ipos WHERE withdrawn_rcept_no IS NULL"
-            )
-        }
+        existing_corp_codes = set()
+        stale_corp_codes = set()
+        for r in conn.execute(
+            "SELECT corp_code, parser_version FROM ipos WHERE withdrawn_rcept_no IS NULL"
+        ):
+            existing_corp_codes.add(r["corp_code"])
+            if (r["parser_version"] or "") != collect_mod.PARSER_VERSION:
+                stale_corp_codes.add(r["corp_code"])
 
     # IPO 후보 그룹핑
     grouped = collect_mod.group_by_corp(disclosures)
@@ -170,11 +174,13 @@ def _run() -> None:
     for corp_code, items in grouped.items():
         try:
             new_items = [it for it in items if it["rcept_no"] not in known]
-            if not new_items:
-                # 완전히 새로운 공시가 없다 — unchanged
+            is_stale = corp_code in stale_corp_codes
+            if not new_items and not is_stale:
+                # 완전히 새로운 공시가 없고 파서 버전도 최신 — unchanged
                 if corp_code in existing_corp_codes:
                     summary.unchanged_count += 1
                 continue
+            # is_stale 이면 new_items 가 비어도 process_corp 로 재파싱 진행 (버전 bump 시 자동 재적용)
 
             # 철회신고서가 포함되면 종목 제외
             if any(collect_mod.classify_report(x.get("report_nm", "")) == "WITHDRAWN" for x in items):

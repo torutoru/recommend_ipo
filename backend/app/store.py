@@ -118,8 +118,8 @@ def connect(path: Optional[Path] = None) -> Iterator[sqlite3.Connection]:
 # **DROP·DELETE 금지** — 추가만. 이 함수는 init_db() 가 자동 호출한다.
 _MIGRATIONS: list[tuple[str, str, str]] = [
     # (table, column, DDL — "ALTER TABLE {table} ADD COLUMN {column} ..." 뒷부분)
-    # 예: 미래에 ipos 에 withdrawn_rcept_no 를 ipos 에 추가해야 할 때
-    #   ("ipos", "some_new_col", "some_new_col TEXT"),
+    # 지시 #16: 파서 버전 추적 → 수집기가 코드 버전과 다르면 종목 재파싱 (DROP 없음, ADD COLUMN 만).
+    ("ipos", "parser_version", "parser_version TEXT"),
 ]
 
 
@@ -165,6 +165,7 @@ def upsert_ipo(
     total_offering_count: Optional[int],
     offering_amount_krw: Optional[int],
     report_rcept_no: Optional[str],
+    parser_version: Optional[str] = None,
 ) -> None:
     now = now_iso_kst()
     conn.execute(
@@ -175,8 +176,8 @@ def upsert_ipo(
             competition_rate, competition_rate_type, demand_quantity, demand_amount_krw,
             lockup_ratio, lockup_ratio_basis, tradable_ratio, old_share_ratio,
             new_share_count, old_share_count, total_offering_count, offering_amount_krw, report_rcept_no,
-            updated_at
-        ) VALUES (?,?,?,?,?,?, ?,?,?,?, ?,?,?,?, ?,?,?,?, ?,?,?,?,?, ?)
+            parser_version, updated_at
+        ) VALUES (?,?,?,?,?,?, ?,?,?,?, ?,?,?,?, ?,?,?,?, ?,?,?,?,?, ?,?)
         ON CONFLICT(corp_code) DO UPDATE SET
             corp_name=excluded.corp_name,
             market=excluded.market,
@@ -200,6 +201,7 @@ def upsert_ipo(
             total_offering_count=excluded.total_offering_count,
             offering_amount_krw=excluded.offering_amount_krw,
             report_rcept_no=excluded.report_rcept_no,
+            parser_version=excluded.parser_version,
             updated_at=excluded.updated_at
         """,
         (
@@ -208,7 +210,7 @@ def upsert_ipo(
             competition_rate, competition_rate_type, demand_quantity, demand_amount_krw,
             lockup_ratio, lockup_ratio_basis, tradable_ratio, old_share_ratio,
             new_share_count, old_share_count, total_offering_count, offering_amount_krw, report_rcept_no,
-            now,
+            parser_version, now,
         ),
     )
 

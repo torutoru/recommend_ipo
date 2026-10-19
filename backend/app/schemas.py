@@ -5,7 +5,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 
-Status = Literal["PENDING", "PASS", "REJECT"]
+Status = Literal["PENDING", "INCOMPLETE", "PASS", "REJECT"]   # v1.0 — INCOMPLETE 추가
 Grade = Literal["S", "A", "B"]                                 # v0.3: C 삭제
 PricePosition = Literal[
     "ABOVE_BAND",

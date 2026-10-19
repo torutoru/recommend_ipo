@@ -17,6 +17,8 @@ const STATUS_OPTIONS: { value: '' | Status; label: string }[] = [
   { value: '', label: '전체' },
   { value: 'PENDING', label: '판정 대기 (PENDING)' },
   { value: 'PASS', label: 'PASS' },
+  { value: 'CORRECTION', label: '정정 요구' },
+  { value: 'INCOMPLETE', label: '판정 보류 (데이터 확인)' },
   { value: 'REJECT', label: 'REJECT' },
 ]
 
@@ -94,6 +96,13 @@ export function ListPage() {
                     {it.subscription_end && it.subscription_end !== it.subscription_start
                       ? ` ~ ${fmtDate(it.subscription_end)}`
                       : ''}
+                    {/* backend 미반영 응답은 price_confirm_date 가 undefined 일 수 있음 — && 로 falsy 처리 */}
+                    {(it.verdict.status === 'PENDING' || it.verdict.status === 'CORRECTION') &&
+                      it.price_confirm_date != null && (
+                        <div className="band-final">
+                          기관 결과 공개 예정: {it.price_confirm_date} (확정공고)
+                        </div>
+                      )}
                   </td>
                   <td>{fmtOrNull(it.listing_date, fmtDate)}</td>
                   <td className="band-cell">

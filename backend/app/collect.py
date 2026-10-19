@@ -44,6 +44,13 @@ ZIP_MAGIC = b"PK\x03\x04"
 
 DART_URL = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo="
 
+# 파서 버전 — 코드가 바뀔 때마다 bump. store.ipos.parser_version 에 저장.
+# 수집기가 DB 저장값과 다르면 "변화 없음" 분기에서 빼내 재파싱.
+# 버전 bump 사례:
+#   v2 — 지시 #16 (티앤이코리아 확약·유통 regex 일반화, 두 표 합산)
+#   v3 — 지시 #19 (INCOMPLETE 상태 도입, "미공시 0점" 폐지)
+PARSER_VERSION = "v3"
+
 
 # ---------- 분류 ----------
 
@@ -244,6 +251,7 @@ def process_corp(
         "total_offering_count": None,
         "offering_amount_krw": None,
         "report_rcept_no": None,
+        "parser_version": PARSER_VERSION,
     }
 
     if core is None:

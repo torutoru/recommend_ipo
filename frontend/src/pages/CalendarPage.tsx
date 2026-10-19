@@ -23,19 +23,23 @@ interface CalEvent {
 const WEEK_HEADER = ['일', '월', '화', '수', '목', '금', '토']
 
 const VERDICT_CLS: Record<string, string> = {
-  'PASS-S':   'event-pass-s',
-  'PASS-A':   'event-pass-a',
-  'PASS-B':   'event-pass-b',
-  'REJECT':   'event-reject',
-  'PENDING':  'event-pending',
+  'PASS-S':     'event-pass-s',
+  'PASS-A':     'event-pass-a',
+  'PASS-B':     'event-pass-b',
+  'REJECT':     'event-reject',
+  'PENDING':    'event-pending',
+  'CORRECTION': 'event-correction',
+  'INCOMPLETE': 'event-incomplete',
 }
 
 const VERDICT_TEXT: Record<string, string> = {
-  'PASS-S':  'S',
-  'PASS-A':  'A',
-  'PASS-B':  'B',
-  'REJECT':  'REJECT',
-  'PENDING': '대기',
+  'PASS-S':     'S',
+  'PASS-A':     'A',
+  'PASS-B':     'B',
+  'REJECT':     'REJECT',
+  'PENDING':    '대기',
+  'CORRECTION': '정정',
+  'INCOMPLETE': '보류',
 }
 
 function verdictKey(v: Verdict): string {
@@ -230,7 +234,10 @@ export function CalendarPage() {
 function EventChip({ ev }: { ev: CalEvent }) {
   const key = verdictKey(ev.item.verdict)
   const label = ev.type === 'LISTING' ? '상장' : '청약'
-  const title = `${ev.item.corp_name} — ${label} (${VERDICT_TEXT[key]})`
+  const warn = ev.item.verdict.status === 'CORRECTION'
+  const title = warn
+    ? `${ev.item.corp_name} — ${label} (${VERDICT_TEXT[key]}) · 일정 변경 가능`
+    : `${ev.item.corp_name} — ${label} (${VERDICT_TEXT[key]})`
   return (
     <Link
       to={`/ipos/${ev.item.id}`}
@@ -238,6 +245,7 @@ function EventChip({ ev }: { ev: CalEvent }) {
       title={title}
       onClick={e => e.stopPropagation()}
     >
+      {warn && <span className="chip-warn" aria-label="일정 변경 가능">⚠</span>}
       <span className="chip-type">{label}</span>
       <span className="chip-grade">{VERDICT_TEXT[key]}</span>
       <span className="chip-name">{ev.item.corp_name}</span>
@@ -250,6 +258,8 @@ function Legend() {
     { key: 'PASS-S', label: 'S 강력 추천' },
     { key: 'PASS-A', label: 'A 청약 유망' },
     { key: 'PASS-B', label: 'B 중립·주의' },
+    { key: 'CORRECTION', label: '⚠ 정정 요구 (일정 변경 가능)' },
+    { key: 'INCOMPLETE', label: '판정 보류 (데이터 확인 필요)' },
     { key: 'REJECT', label: 'REJECT 비추천' },
     { key: 'PENDING', label: '판정 대기 (흐리게)' },
   ]

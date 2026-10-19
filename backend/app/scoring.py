@@ -125,13 +125,36 @@ def _grade(total: int, cfg: ScoringConfig) -> Optional[Grade]:
 
 # ---------- 근거 문장 ----------
 
+def _is_incomplete(ind: Indicators) -> bool:
+    """v1.0 (지시 #19): 경쟁률·가격 있지만 다음 지표 중 하나라도 null 이면 판정 보류.
+
+    - lockup_ratio null
+    - tradable_ratio null
+    - tradable ≤ 35 이면서 old_share null (flow 가 0 로 확정될 수 없음)
+
+    tradable > 35 이면 어차피 flow=0 (zero_if) 로 확정되므로 old_share null 이어도 PASS/REJECT 진행 가능.
+    """
+    if ind.lockup_ratio is None:
+        return True
+    if ind.tradable_ratio is None:
+        return True
+    if ind.tradable_ratio <= 35 and ind.old_share_ratio is None:
+        return True
+    return False
+
+
 def _reason_lines(
     ind: Indicators,
     scores: Scores,
     comp_bonus_applied: bool,
     cfg: ScoringConfig,
 ) -> list[str]:
-    """사용자 노출용 한국어 판정 근거. 미공시 지표는 '○○ 미공시 — 0점 처리' 로 명시."""
+    """사용자 노출용 한국어 판정 근거.
+
+    v1.0 (지시 #19): "미공시 — 0점 처리" 문구 제거. 미공시 지표는 status=INCOMPLETE 분기에서
+    "○○ 확인 필요 — 판정 보류" 로 별도 기록(아래 incomplete_reason_lines).
+    여기서는 **확정된 지표만** 점수 라인을 출력한다.
+    """
     lines: list[str] = []
     assert ind.competition_rate is not None
     assert ind.price_position is not None
@@ -154,21 +177,34 @@ def _reason_lines(
     }[ind.price_position]
     lines.append(f"확정 공모가 위치: {pos_label} → {scores.price}/{cfg.score.price.max}점")
 
-    if ind.lockup_ratio is None:
-        lines.append("의무보유확약 비율 미공시 — 0점 처리")
-    else:
+    if ind.lockup_ratio is not None and scores.lockup is not None:
         lines.append(
             f"기관 의무보유확약 비율 {ind.lockup_ratio:.1f}% → {scores.lockup}/{cfg.score.lockup.max}점"
         )
-
-    if ind.tradable_ratio is None or ind.old_share_ratio is None:
-        lines.append("유통가능/구주매출 비율 미공시 — 0점 처리")
-    else:
+    if ind.tradable_ratio is not None and scores.flow is not None:
+        old_s = ind.old_share_ratio if ind.old_share_ratio is not None else 0.0
         lines.append(
-            f"상장일 유통가능 {ind.tradable_ratio:.1f}%, 구주매출 {ind.old_share_ratio:.1f}% "
+            f"상장일 유통가능 {ind.tradable_ratio:.1f}%, 구주매출 {old_s:.1f}% "
             f"→ {scores.flow}/{cfg.score.flow.max}점"
         )
 
+    return lines
+
+
+def _incomplete_reasons(ind: Indicators) -> list[str]:
+    """INCOMPLETE 상태에서 "○○ 확인 필요 — 판정 보류" 라인들."""
+    lines: list[str] = []
+    assert ind.competition_rate is not None
+    assert ind.price_position is not None
+    # 확정된 지표도 확인용으로 짧게 같이 보여줌
+    lines.append(f"기관 수요예측 경쟁률 {ind.competition_rate:,.1f}:1")
+    lines.append(f"확정 공모가 위치: {ind.price_position}")
+    if ind.lockup_ratio is None:
+        lines.append("의무보유확약 비율 확인 필요 — 판정 보류")
+    if ind.tradable_ratio is None:
+        lines.append("유통가능 비율 확인 필요 — 판정 보류")
+    elif ind.tradable_ratio <= 35 and ind.old_share_ratio is None:
+        lines.append("구주매출 비율 확인 필요 — 판정 보류 (유통가능 ≤ 35% 로 flow 점수가 확정되지 않음)")
     return lines
 
 
@@ -187,6 +223,24 @@ def evaluate(ind: Indicators, cfg: ScoringConfig) -> EvaluationResult:
 
     assert ind.competition_rate is not None
     assert ind.price_position is not None
+
+    # v1.0 (지시 #19): 미공시 지표가 있으면 INCOMPLETE (0점으로 묻히지 않음).
+    if _is_incomplete(ind):
+        comp, _bonus = _score_comp(ind.competition_rate, ind.offering_amount_krw, cfg)
+        price = _score_price(ind.price_position, cfg)
+        lockup = _score_lockup(ind.lockup_ratio, cfg) if ind.lockup_ratio is not None else None
+        if ind.tradable_ratio is not None and (ind.tradable_ratio > 35 or ind.old_share_ratio is not None):
+            flow = _score_flow(ind.tradable_ratio, ind.old_share_ratio, cfg)
+        else:
+            flow = None
+        return EvaluationResult(
+            status="INCOMPLETE",
+            grade=None,
+            scores=Scores(comp=comp, price=price, lockup=lockup, flow=flow, total=None),
+            reasons=_incomplete_reasons(ind),
+            reject_reasons=[],
+        )
+
     comp, bonus = _score_comp(ind.competition_rate, ind.offering_amount_krw, cfg)
     price = _score_price(ind.price_position, cfg)
     lockup = _score_lockup(ind.lockup_ratio, cfg)

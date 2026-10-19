@@ -12,6 +12,10 @@
   --reject-weak: #fbe4e1;
   --pending: #946800;
   --pending-weak: #fdf3dd;
+  --correction: #c15a00;
+  --correction-weak: #ffe4c4;
+  --incomplete: #5f3dc4;
+  --incomplete-weak: #ece6ff;
   --radius: 8px;
 }
 
@@ -132,6 +136,16 @@ table.ipo-table tbody tr:hover { background: var(--accent-weak); }
 .badge-pending { background: var(--pending-weak); color: var(--pending); border-color: #f0d794; }
 .badge-reject  { background: var(--reject-weak);  color: var(--reject);  border-color: #f0b2ab; }
 .badge-pass    { background: var(--pass-weak);    color: var(--pass);    border-color: #a4d9c1; }
+.badge-correction {
+  background: var(--correction-weak);
+  color: var(--correction);
+  border-color: #f0b876;
+}
+.badge-incomplete {
+  background: var(--incomplete-weak);
+  color: var(--incomplete);
+  border-color: #c9b9f0;
+}
 .badge-grade-S { background: #0e5e40; color: #fff; border-color: #0e5e40; }
 .badge-grade-A { background: var(--pass); color: #fff; border-color: var(--pass); }
 .badge-grade-B { background: #d79a1e; color: #fff; border-color: #d79a1e; }
@@ -166,7 +180,8 @@ dl.meta dd { margin: 0; font-size: 14px; }
 .indicator-value { font-size: 15px; font-weight: 600; margin-bottom: 8px; }
 .indicator-sub { color: var(--fg-mute); font-size: 12px; margin-bottom: 6px; }
 .indicator-score { color: var(--accent); font-size: 13px; font-variant-numeric: tabular-nums; }
-.indicator-missing { color: var(--pending); margin-left: 4px; font-weight: 600; }
+.indicator-missing { color: var(--incomplete); margin-left: 4px; font-weight: 600; }
+.verdict-incomplete { color: var(--incomplete); }
 
 .meta-cols-3 { grid-template-columns: repeat(3, 1fr); }
 .meta-cols-4 { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
@@ -257,6 +272,8 @@ table.checklist-table tbody tr.result-info   { background: #fcfcff; }
   white-space: nowrap;
 }
 .result-badge.result-met    { background: #ddf3e4; color: #0e5e40; border-color: #a4d9c1; }
+.result-badge.result-met.result-met-good      { background: #cdefd9; color: #0b5236; border-color: #86c7a4; }
+.result-badge.result-met.result-met-very-good { background: #0e5e40; color: #ffffff; border-color: #0e5e40; }
 .result-badge.result-notmet { background: #fbe4e1; color: #a3251b; border-color: #f0b2ab; }
 .result-badge.result-unknown { background: #e8ebf0; color: var(--fg-mute); border-color: #cfd4de; }
 .result-badge.result-info   { background: #e8f0ff; color: var(--accent); border-color: #cfdbf5; }
@@ -432,7 +449,9 @@ table.checklist-table tbody tr.result-info   { background: #fcfcff; }
 .legend-item.event-pass-a   { color: var(--pass); }
 .legend-item.event-pass-b   { color: #d79a1e; }
 .legend-item.event-reject   { color: var(--reject); }
-.legend-item.event-pending  { color: var(--pending); }
+.legend-item.event-pending    { color: var(--pending); }
+.legend-item.event-correction { color: var(--correction); }
+.legend-item.event-incomplete { color: var(--incomplete); }
 .legend-sep { color: var(--border); }
 .legend-note { color: var(--fg-mute); }
 
@@ -520,6 +539,33 @@ table.checklist-table tbody tr.result-info   { background: #fcfcff; }
 .cal-chip.event-pending .chip-type {
   background: rgba(148, 104, 0, 0.12);
   color: var(--pending);
+}
+.cal-chip.event-correction { background: var(--correction); }
+.cal-chip.event-incomplete { background: var(--incomplete); }
+.chip-warn { font-size: 11px; line-height: 1; }
+
+/* Correction banner (상세 상단) */
+.correction-banner {
+  margin: 16px 0 24px;
+  padding: 14px 18px;
+  background: var(--correction-weak);
+  border: 1px solid #f0b876;
+  border-left: 4px solid var(--correction);
+  border-radius: var(--radius);
+}
+.correction-banner h3 { margin: 0 0 6px; font-size: 15px; color: var(--correction); }
+.correction-banner p  { margin: 4px 0 0; font-size: 13px; color: var(--fg); }
+
+/* Overdue (확정공고일 경과) */
+.overdue-banner {
+  margin: 16px 0 24px;
+  padding: 10px 14px;
+  background: var(--pending-weak);
+  border: 1px solid #f0d794;
+  border-left: 4px solid var(--pending);
+  border-radius: var(--radius);
+  color: var(--fg);
+  font-size: 13px;
 }
 
 .cal-more {

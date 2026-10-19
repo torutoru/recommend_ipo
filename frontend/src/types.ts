@@ -1,6 +1,17 @@
 // .claude/co-work/api-contract.md (v0.3) 와 1:1 매칭. 변경 전 pm 과 협상.
 
-export type Status = 'PENDING' | 'PASS' | 'REJECT'
+// v0.8 CORRECTION = 정정 요구·일정 변경 가능
+// v1.0 INCOMPLETE = 판정 보류·데이터 확인 필요 (미공시 0점 처리 폐지)
+export type Status = 'PENDING' | 'PASS' | 'REJECT' | 'CORRECTION' | 'INCOMPLETE'
+
+// v0.8: 정정 요구 정보 (`Verdict.correction`). 해당 없으면 null.
+export interface Correction {
+  requested_at: string          // 금감원 정정신고서 제출요구일 (YYYY-MM-DD)
+  amended_at: string | null     // 그 이후 정정신고서 제출일. 아직이면 null
+}
+
+// v0.9 ChecklistItem.level — MET 일 때 단계 (현재 competition 만 사용).
+export type ChecklistLevel = 'VERY_GOOD' | 'GOOD'
 export type Grade = 'S' | 'A' | 'B' // v0.3: C 삭제
 export type Market = 'KOSPI' | 'KOSDAQ' | 'KONEX'
 export type PricePosition =
@@ -33,13 +44,17 @@ export interface ChecklistItem {
   criterion: string
   actual: string | null
   result: ChecklistResult
+  // v0.9 — MET 일 때만 사용되는 단계 (≥1500 VERY_GOOD, ≥1000 GOOD).
+  // 다른 항목·결과는 null.
+  level: ChecklistLevel | null
 }
 
 export interface Verdict {
   status: Status
   grade: Grade | null
-  // PASS·REJECT 일 때 값. PENDING 은 null. 불변식: verdict.score === scores.total.
+  // PASS·REJECT 일 때 값. PENDING·CORRECTION 은 null. 불변식: verdict.score === scores.total.
   score: number | null
+  correction: Correction | null  // v0.8 — status === 'CORRECTION' 이면 값, 그 외 null
 }
 
 export interface IpoSummary {
@@ -55,6 +70,10 @@ export interface IpoSummary {
   band_high: number | null
   final_price: number | null
   verdict: Verdict
+  // v1.1: 공모가 확정공고일 (이날 [발행조건확정] 공시로 기관 데이터 공개). 못 찾으면 null.
+  price_confirm_date: string | null
+  demand_forecast_start: string | null
+  demand_forecast_end: string | null
   updated_at: string
 }
 
@@ -108,6 +127,8 @@ export interface IpoDetail extends IpoSummary {
   sources: SourceDoc[]
   // v0.3: 가이드 2장 — 항상 6개, key 순서 고정
   checklist: ChecklistItem[]
+  // v1.2: 주관사·공동주관사 이름 (사람이 읽는 그대로). 빈 배열이면 미공시.
+  underwriters: string[]
 }
 
 export interface ListParams {
@@ -204,7 +225,9 @@ export interface ScoringConfig {
     fee_krw: number
   }
   checklist: {
-    competition_min: number
+    // v0.9: competition_min → good_min + very_good_min 로 분리.
+    competition_good_min: number
+    competition_very_good_min: number
     price_positions_met: PricePosition[]
     lockup_min: number
     flow_tradable_max: number

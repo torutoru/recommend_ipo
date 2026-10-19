@@ -1,12 +1,23 @@
-import type { ChecklistItem, ChecklistResult } from '../types'
+import type { ChecklistItem, ChecklistLevel, ChecklistResult } from '../types'
 
 type ResultCfg = { icon: string; label: string; cls: string }
 
-const RESULT_CFG: Record<ChecklistResult, ResultCfg> = {
-  MET:     { icon: '✓', label: '만족',   cls: 'result-met' },
+// MET 은 level 에 따라 세 가지 표시 — 아이콘·텍스트·색 병기.
+function metCfg(level: ChecklistLevel | null): ResultCfg {
+  if (level === 'VERY_GOOD') return { icon: '✓✓', label: '아주 좋음', cls: 'result-met result-met-very-good' }
+  if (level === 'GOOD')      return { icon: '✓',  label: '좋음',       cls: 'result-met result-met-good' }
+  return                            { icon: '✓',  label: '만족',       cls: 'result-met' }
+}
+
+const BASE_CFG: Record<Exclude<ChecklistResult, 'MET'>, ResultCfg> = {
   NOT_MET: { icon: '✗', label: '불만족', cls: 'result-notmet' },
   UNKNOWN: { icon: '—', label: '미공시', cls: 'result-unknown' },
   INFO:    { icon: '',  label: '정보',   cls: 'result-info' },
+}
+
+function cfgFor(item: ChecklistItem): ResultCfg {
+  // v0.9 backend 미반영 응답은 level 필드 자체가 없을 수 있음 → ?? null 로 default 경로.
+  return item.result === 'MET' ? metCfg(item.level ?? null) : BASE_CFG[item.result]
 }
 
 export function Checklist({ items }: { items: ChecklistItem[] }) {
@@ -34,7 +45,7 @@ export function Checklist({ items }: { items: ChecklistItem[] }) {
           </thead>
           <tbody>
             {items.map(item => {
-              const cfg = RESULT_CFG[item.result]
+              const cfg = cfgFor(item)
               return (
                 <tr key={item.key} className={cfg.cls}>
                   <td>{item.label}</td>

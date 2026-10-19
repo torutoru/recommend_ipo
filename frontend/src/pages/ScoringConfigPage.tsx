@@ -122,7 +122,13 @@ function ScoringConfigView({ cfg }: { cfg: ScoringConfig }) {
       <h3>4. 체크리스트 만족 기준</h3>
       <table className="grade-table">
         <tbody>
-          <tr><td>기관 경쟁률</td><td>≥ {ck.competition_min.toLocaleString()}:1</td></tr>
+          <tr>
+            <td>기관 경쟁률</td>
+            <td>
+              ≥ {ck.competition_good_min.toLocaleString()}:1 <strong>좋음</strong>,{' '}
+              ≥ {ck.competition_very_good_min.toLocaleString()}:1 <strong>아주 좋음</strong>
+            </td>
+          </tr>
           <tr><td>공모가 위치</td><td>{ck.price_positions_met.map(pricePositionLabel).join(' / ')}</td></tr>
           <tr><td>의무보유 확약</td><td>≥ {ck.lockup_min}%</td></tr>
           <tr><td>유통/구주</td><td>유통 ≤ {ck.flow_tradable_max}% 그리고 구주 &lt; {ck.flow_old_share_lt}%</td></tr>

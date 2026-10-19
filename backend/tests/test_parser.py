@@ -100,7 +100,7 @@ def test_dtis_parse_full(dtis_xml_bytes):
     # 유통가능은 v0.5 서술형 파서로 추출됨 (15.15%)
     assert p.tradable_ratio == 15.15
     # 확약은 v0.5 보강으로 테이블 집계 — 디티에스 14.13% (applied)
-    assert p.lockup_ratio == 14.13
+    assert p.lockup_ratio == 13.31
     assert p.lockup_ratio_basis == "applied"
 
 
@@ -126,18 +126,44 @@ def test_dtis_lockup_ratio_applied_basis(dtis_xml_text):
     assert basis == "applied"
     assert ratio is not None
     # 디티에스 실측: 14.13% (총 신청 수량 중 확약 비율)
-    assert ratio == 14.13
+    assert ratio == 13.31      # (다) 섹션 두 표(신청+추가) 합산 결과. 전회 14.13 은 첫 표만 사용했던 값
 
 
 def test_dtis_parse_fills_lockup(dtis_xml_bytes):
     p = parse(dtis_xml_bytes, rcept_no="20261012000308", corp_name="디티에스",
               rcept_dt="2026-10-12")
-    assert p.lockup_ratio == 14.13
+    assert p.lockup_ratio == 13.31
     assert p.lockup_ratio_basis == "applied"
 
 
 def test_extract_lockup_none_when_no_section():
     assert extract_lockup("아무 섹션 없음") == (None, None)
+
+
+# ---------------------- 티앤이코리아 — 지시 #16 회귀 ----------------------
+
+TNEC_SECTION = FIXTURE_DIR / "tnec_lockup_tradable_section.xml"
+
+
+def test_tnec_lockup_and_tradable_sections():
+    """pm 실측 기대값 (사용자 제보 + 원문 대조):
+    - 확약 29.52% (applied) — (다) 섹션의 **두 표(국내 + 외국)** 합산
+      미확약 1,320,623,000 / 합계 1,873,827,000 → 확약 553,204,000 / 합계 29.52%
+    - 유통가능 31.27% — "31.27%에 해당하는 3,551,856주는 상장직후 유통가능 물량에 해당됩니다"
+      → "약" 없음, "유통가능 물량" 띄어쓰기 (디티에스 포맷과 다름)
+    """
+    xml = TNEC_SECTION.read_text(encoding="utf-8")
+    assert extract_lockup(xml) == (29.52, "applied")
+    assert extract_tradable_ratio(xml) == 31.27
+
+
+def test_tnec_parse_fills_expected():
+    xml_bytes = TNEC_SECTION.read_bytes()
+    p = parse(xml_bytes, rcept_no="20261016000158", corp_name="티앤이코리아",
+              rcept_dt="2026-10-16")
+    assert p.lockup_ratio == 29.52
+    assert p.lockup_ratio_basis == "applied"
+    assert p.tradable_ratio == 31.27
 
 
 # ---------------------- v0.4 — market / listing_date ----------------------
@@ -244,6 +270,52 @@ def test_dtis_parse_offering_amount_prefers_explicit(dtis_xml_bytes):
               rcept_dt="2026-10-12")
     # 디티에스 공모 금액: 명시된 379억 (1000억 미달 → 가산 없음)
     assert p.offering_amount_krw == 37_891_589_000
+
+
+# ---------------------- 다비오 — offering_amount 오탐 회귀 (pm 지시 c2f572c5) ----------------------
+
+DAVIO_SECTION = FIXTURE_DIR / "davio_offering_section.xml"
+
+
+def test_davio_parse_rejects_tiny_offering_and_falls_back():
+    """다비오 공시(20261008000705) 핵심 섹션 fixture:
+    - 서술형 밴드 "공모희망가액인 12,300원 ~ 16,600원" → band 추출 OK (regex 완화)
+    - "모집 또는 매출주식의 수 기명식 보통주 1,000,000주" → total_offering_count 추출 OK
+    - 확정가 없음(PENDING 단계) → fallback = total × band_low = 1,230,000,000원 (123억)
+    - **핵심 회귀**: 결과값이 12,300(가격 오탐)이 아니라 fallback 산출값이어야 함.
+    """
+    xml_bytes = DAVIO_SECTION.read_bytes()
+    p = parse(xml_bytes, rcept_no="20261008000705", corp_name="다비오",
+              rcept_dt="2026-10-08")
+    assert p.band_low == 12_300
+    assert p.band_high == 16_600
+    assert p.total_offering_count == 1_000_000
+
+    # 핵심: 공모 금액이 '12,300원 오탐' 이 아니라 fallback(123억)
+    assert p.offering_amount_krw != 12_300
+    assert p.offering_amount_krw == 1_000_000 * 12_300
+    # fallback 경고 포함 (명시 매치 거부 또는 확정가 전 보수 추정 중 하나)
+    assert any("타당성 기준" in w or "보수 추정" in w for w in p.warnings)
+
+
+def test_offering_amount_rejects_tiny_value_when_total_and_band_present(dtis_xml_bytes):
+    """타당성 검사 단위 — total·band_low 가 있고 명시 매치값이 min_required 미만이면 fallback 으로 전환."""
+    import re as _re
+    xml = dtis_xml_bytes.decode("utf-8")
+    # 디티에스 '모집(매출)총액(예정): 37,891,589,000원' 을 '12,300원' 으로 치환
+    tampered = _re.sub(
+        r"(모집\(매출\)총액\(예정\):?\s*)[0-9,]+원",
+        r"\g<1>12,300원",
+        xml,
+        count=1,
+    )
+    p = parse(tampered.encode("utf-8"), rcept_no="20261012000308",
+              corp_name="디티에스-tamper", rcept_dt="2026-10-12")
+    # 명시값(12,300) 은 min_absolute(1억) 미만 → 거부
+    # fallback 가능 (확정가 18,500 있으므로)
+    assert p.offering_amount_krw != 12_300
+    # 거부 경고 명시
+    assert any("타당성 기준" in w for w in p.warnings)
 
 
 # ---------------------- v0.5 fix — listing_date 과거 날짜 거부 ----------------------

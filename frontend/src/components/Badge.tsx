@@ -4,6 +4,28 @@ export function VerdictBadge({ verdict }: { verdict: Verdict }) {
   if (verdict.status === 'PENDING') {
     return <span className="badge badge-pending" title="수요예측 미공시">판정 대기</span>
   }
+  if (verdict.status === 'CORRECTION') {
+    return (
+      <span
+        className="badge badge-correction"
+        title="금융감독원 정정신고서 제출요구 — 일정 변경 가능"
+        role="status"
+      >
+        <span aria-hidden>⚠</span> 정정 요구
+      </span>
+    )
+  }
+  if (verdict.status === 'INCOMPLETE') {
+    return (
+      <span
+        className="badge badge-incomplete"
+        title="데이터 확인 필요 — 확약·유통 지표 확정 불가"
+        role="status"
+      >
+        판정 보류
+      </span>
+    )
+  }
   if (verdict.status === 'REJECT') {
     return <span className="badge badge-reject" title="청약 비추천">REJECT</span>
   }
@@ -24,12 +46,16 @@ export const GRADE_LABEL: Record<Grade, string> = {
 export const REJECT_LABEL = '청약 비추천'
 
 export function gradeExecLabel(status: Status, grade: Grade | null): string {
+  // CORRECTION·INCOMPLETE·PENDING 은 등급 가이드 배너를 띄우지 않음.
+  // (CORRECTION 은 상세의 경고 배너로, INCOMPLETE 는 "판정 보류" 메타로 대체)
+  if (status === 'CORRECTION' || status === 'INCOMPLETE' || status === 'PENDING') return ''
   if (status === 'REJECT') return REJECT_LABEL
   if (grade === null) return ''
   return GRADE_LABEL[grade]
 }
 
 export function gradeExecGuide(status: Status, grade: Grade | null): string {
+  if (status === 'CORRECTION' || status === 'INCOMPLETE' || status === 'PENDING') return ''
   if (status === 'REJECT') {
     return '원금 손실 위험이 큰 종목으로 분류됩니다. 청약 보류 / 패스를 권장합니다.'
   }

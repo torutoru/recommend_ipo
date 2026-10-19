@@ -138,20 +138,70 @@ export function DetailPage() {
           <div><dt>시장</dt><dd>{marketLabel(detail.market)}</dd></div>
           <div><dt>청약일</dt><dd>{fmtDateRange(detail.subscription_start, detail.subscription_end)}</dd></div>
           <div><dt>상장일</dt><dd>{fmtOrNull(detail.listing_date, fmtDate)}</dd></div>
+          <div>
+            <dt>수요예측 기간</dt>
+            <dd>{fmtDateRange(detail.demand_forecast_start ?? null, detail.demand_forecast_end ?? null)}</dd>
+          </div>
+          <div>
+            <dt>확정공고일 (기관 결과 공개 예정)</dt>
+            <dd>{fmtOrNull(detail.price_confirm_date ?? null, fmtDate)}</dd>
+          </div>
           <div><dt>희망 밴드</dt><dd>{fmtBand(detail.band_low, detail.band_high)}</dd></div>
           <div><dt>확정 공모가</dt><dd>{fmtOrNull(detail.final_price, fmtKrw)}</dd></div>
           <div><dt>총점 · 등급</dt>
             <dd>
-              {totalLine}
-              {detail.verdict.grade && (
-                <> · <strong>{detail.verdict.grade}</strong></>
+              {detail.verdict.status === 'INCOMPLETE' ? (
+                <strong className="verdict-incomplete">판정 보류 · 데이터 확인 필요</strong>
+              ) : (
+                <>
+                  {totalLine}
+                  {detail.verdict.grade && (
+                    <> · <strong>{detail.verdict.grade}</strong></>
+                  )}
+                </>
               )}
+            </dd>
+          </div>
+          <div>
+            <dt>주관사</dt>
+            <dd>
+              {(() => {
+                // backend 미반영 상태에서 응답에 필드 자체가 없을 수 있음 (undefined).
+                const list = detail.underwriters ?? []
+                return list.length === 0 ? NULL_PLACEHOLDER : list.join(', ')
+              })()}
             </dd>
           </div>
           <div><dt>기준 공시 접수번호</dt><dd>{fmtOrNull(ind.report_rcept_no, s => s)}</dd></div>
           <div><dt>갱신 시각</dt><dd>{detail.updated_at}</dd></div>
         </dl>
       </header>
+
+      {/* v1.1 — PENDING 인데 확정공고일이 이미 지났으면 "다시 수집" 유도
+          (backend 미반영 응답은 price_confirm_date 가 undefined 일 수 있음 — `!= null` 로 둘 다 처리) */}
+      {detail.verdict.status === 'PENDING' &&
+        detail.price_confirm_date != null &&
+        detail.price_confirm_date < new Date().toISOString().slice(0, 10) && (
+          <aside className="overdue-banner" role="status">
+            확정공고일({detail.price_confirm_date})이 지났지만 아직 수요예측 결과가 수집되지 않았습니다.
+            홈에서 <strong>"수집 및 분석하기"</strong> 를 눌러 다시 시도해 주세요.
+          </aside>
+        )}
+
+      {detail.verdict.status === 'CORRECTION' && detail.verdict.correction && (
+        <aside className="correction-banner" role="alert">
+          <h3><span aria-hidden>⚠</span> 금융감독원 정정신고서 제출요구</h3>
+          <p>
+            제출요구일: <strong>{detail.verdict.correction.requested_at}</strong>
+            {detail.verdict.correction.amended_at
+              ? <> · 정정신고서 제출일: <strong>{detail.verdict.correction.amended_at}</strong></>
+              : <> · <strong>정정신고서 아직 미제출</strong></>}
+          </p>
+          <p>
+            청약 일정이 바뀔 수 있습니다. 증권사 공지를 반드시 확인하세요.
+          </p>
+        </aside>
+      )}
 
       {execLabel && (
         <aside className={`grade-exec grade-exec-${detail.verdict.status.toLowerCase()}`}>
@@ -165,7 +215,12 @@ export function DetailPage() {
       <h3>지표 및 점수</h3>
       <div className="indicator-grid">
         {rows.map((r, i) => {
-          const showMissing = r.indicatorMissing && r.scoreValue !== null
+          // v1.0: 미공시 0점 처리 폐지. 지표 null + 점수 null 인 INCOMPLETE 종목에서
+          // 해당 지표 셀에 "확인 필요" 라벨을 붙여 판정 보류 사유를 바로 보이게.
+          const needsInput =
+            detail.verdict.status === 'INCOMPLETE' &&
+            r.indicatorMissing &&
+            r.scoreValue === null
           return (
             <div className="indicator-card" key={i}>
               <div className="indicator-label">{r.label}</div>
@@ -173,9 +228,9 @@ export function DetailPage() {
               {r.sub && <div className="indicator-sub">{r.sub}</div>}
               <div className="indicator-score">
                 점수 {scoreLabel(r)}
-                {showMissing && (
-                  <span className="indicator-missing" title="지표 미공시 — 0점 처리">
-                    · 미공시
+                {needsInput && (
+                  <span className="indicator-missing" title="데이터 확인 필요 — 판정 보류">
+                    · 확인 필요
                   </span>
                 )}
               </div>

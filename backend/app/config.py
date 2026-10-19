@@ -42,6 +42,12 @@ class Settings(BaseSettings):
     def spac_keywords(self) -> list[str]:
         return [k.strip() for k in self.spac_exclusion_keywords.split(",") if k.strip()]
 
+    # 공모 금액 타당성 검사 (pm 지시 — 다비오 사례: 12,300원 오탐).
+    # 원문 "모집(매출)총액" 매치값이 아래 두 하한 중 어느 하나라도 미달이면 null + warning
+    # → fallback(total_offering_count × final_price) 로 다시 산출. 둘 다 없으면 null.
+    offering_amount_min_absolute_krw: int = 100_000_000           # 1억 원 (업계 최소 IPO 규모 기준)
+    offering_amount_min_ratio_vs_band_low: float = 0.10           # total_offering_count × band_low 의 10%
+
     # 수집 보호 (requirements 12장, api-contract v0.7). 비어 있으면 보호 없음.
     collect_key: str = ""
 

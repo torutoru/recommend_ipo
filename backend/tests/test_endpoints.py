@@ -104,12 +104,15 @@ def test_detail_pass_s(client):
     assert d["indicators"]["price_position"] == "ABOVE_BAND"
 
 
-def test_detail_pass_a_lockup_unknown(client):
-    """북극로보틱스 (00990005) — lockup=UNKNOWN(0점) + 체크리스트 lockup UNKNOWN."""
+def test_detail_incomplete_lockup_unknown(client):
+    """v1.0 (지시 #19): 북극로보틱스 (00990005) — lockup=null → **INCOMPLETE**, 체크리스트 lockup UNKNOWN.
+    (기존 'PASS A + 0점' 가정은 미공시가 잘못된 REJECT/확정으로 묻히는 문제가 있어 폐지.)
+    """
     d = client.get("/api/ipos/00990005").json()
-    assert d["verdict"]["status"] == "PASS"
-    assert d["verdict"]["grade"] == "A"
-    assert d["scores"]["lockup"] == 0
+    assert d["verdict"]["status"] == "INCOMPLETE"
+    assert d["verdict"]["grade"] is None
+    assert d["scores"]["total"] is None
+    assert d["scores"]["lockup"] is None
     checklist = {c["key"]: c for c in d["checklist"]}
     assert checklist["lockup"]["result"] == "UNKNOWN"
     assert checklist["lockup"]["actual"] is None
