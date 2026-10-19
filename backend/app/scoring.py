@@ -542,6 +542,9 @@ def summary_from_detail(detail: IpoDetail) -> IpoSummary:
         subscription_start=detail.subscription_start,
         subscription_end=detail.subscription_end,
         listing_date=detail.listing_date,
+        price_confirm_date=detail.price_confirm_date,              # v1.1 (지시 #20)
+        demand_forecast_start=detail.demand_forecast_start,
+        demand_forecast_end=detail.demand_forecast_end,
         band_low=detail.band_low,
         band_high=detail.band_high,
         final_price=detail.final_price,

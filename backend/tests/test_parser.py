@@ -440,3 +440,51 @@ def test_tradable_narrative_inverted_requires_sang_jang_jik_hu():
     # fallback(table regex 등) 가 매치할 수 있으므로 narrative_inverted 단독 확인은 regex 로
     from app.parser import _RE_TRADABLE_RATIO_NARRATIVE_INVERTED
     assert _RE_TRADABLE_RATIO_NARRATIVE_INVERTED.search(text) is None
+
+
+# ---------------- 지시 #20: 공모가 확정공고일 + 수요예측 기간 ----------------
+
+def test_extract_price_confirm_date_explicit_label():
+    """본문 '공모가액 확정공고 2026년 10월 16일' 명시 매치."""
+    from app.parser import extract_price_confirm_date
+    text = "<P>공모가액 확정공고 2026년 10월 16일(목)에 실시합니다.</P>"
+    assert extract_price_confirm_date(text) == "2026-10-16"
+
+
+def test_extract_price_confirm_date_matulip_label():
+    """'모집 또는 매출가액 확정의 공고' 라벨도 매치."""
+    from app.parser import extract_price_confirm_date
+    text = "<P>모집 또는 매출가액 확정의 공고 2026년 10월 20일</P>"
+    assert extract_price_confirm_date(text) == "2026-10-20"
+
+
+def test_extract_price_confirm_date_null_when_no_match():
+    """명시 서술 없으면 null (디티에스 발행조건확정 패턴 — collect 에서 접수일로 fallback)."""
+    from app.parser import extract_price_confirm_date
+    text = "<P>청약공고일 2026년 10월 13일</P>"   # "확정공고" 아니라 "청약공고"
+    assert extract_price_confirm_date(text) is None
+
+
+def test_extract_demand_forecast_period_full_year():
+    """'수요예측 기간: 2026년 10월 15일 ~ 2026년 10월 16일' 매치."""
+    from app.parser import extract_demand_forecast_period
+    text = "<P>수요예측 기간: 2026년 10월 15일 ~ 2026년 10월 16일</P>"
+    s, e = extract_demand_forecast_period(text)
+    assert s == "2026-10-15"
+    assert e == "2026-10-16"
+
+
+def test_extract_demand_forecast_period_short_year():
+    """연도 반복 생략 '수요예측기간 2026년 10월 15일 ~ 10월 16일' 매치."""
+    from app.parser import extract_demand_forecast_period
+    text = "<P>수요예측기간 2026년 10월 15일 ~ 10월 16일</P>"
+    s, e = extract_demand_forecast_period(text)
+    assert s == "2026-10-15"
+    assert e == "2026-10-16"
+
+
+def test_extract_demand_forecast_period_null_when_no_match():
+    from app.parser import extract_demand_forecast_period
+    text = "<P>청약기간: 2026년 10월 20일 ~ 2026년 10월 21일</P>"
+    s, e = extract_demand_forecast_period(text)
+    assert s is None and e is None

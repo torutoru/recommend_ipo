@@ -52,7 +52,8 @@ DART_URL = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo="
 #   v4 — 지시 #24 (재파싱 시 종목 전체 이력 조회, core=None 보호, sources 보존)
 #   v5 — 지시 #25 (실적보고서 상장일(매매개시일)·상장구분 파싱 + ISSUANCE_REPORT 보강)
 #   v6 — 지시 #26 (삼성증권 형식 — 확약 섹션 "의무보유 확약 신청내역" 수용 + 유통 서술형 역순)
-PARSER_VERSION = "v6"
+#   v7 — 지시 #20 (공모가 확정공고일·수요예측 기간 — 명시 매치 + 발행조건확정 접수일 fallback)
+PARSER_VERSION = "v7"
 
 
 # ---------- 분류 ----------
@@ -255,6 +256,10 @@ def process_corp(
         "offering_amount_krw": None,
         "report_rcept_no": None,
         "parser_version": PARSER_VERSION,
+        # v1.1 (지시 #20): 공모 일정
+        "price_confirm_date": None,
+        "demand_forecast_start": None,
+        "demand_forecast_end": None,
     }
 
     if core is None:
@@ -371,7 +376,14 @@ def process_corp(
             total_offering_count=parsed.total_offering_count,
             offering_amount_krw=parsed.offering_amount_krw,
             report_rcept_no=rcept_no,
+            price_confirm_date=parsed.price_confirm_date,
+            demand_forecast_start=parsed.demand_forecast_start,
+            demand_forecast_end=parsed.demand_forecast_end,
         )
+        # 지시 #20: price_confirm_date 는 발행조건확정 공시 접수일로 fallback.
+        # 명세: "확정공고일 = 이날 [발행조건확정] 공시로 기관 데이터 공개" → core 가 [발행조건확정] 이면 접수일 == 공고일.
+        if row["price_confirm_date"] is None and is_final_release(core.get("report_nm", "")):
+            row["price_confirm_date"] = _dash_date(core.get("rcept_dt", "")) or None
         parsed_warnings.extend(parsed.warnings)
 
         # 지시 #25: ISSUANCE_REPORT 로 상장일·시장 보강.

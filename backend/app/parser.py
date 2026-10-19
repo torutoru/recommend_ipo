@@ -45,6 +45,11 @@ class ParsedIpo:
     market: Optional[Market] = None           # v0.4 (requirements 10장)
     listing_date: Optional[str] = None        # v0.4 — 원문에 명시 없으면 null (추정 금지)
 
+    # v1.1 (지시 #20): 공모 일정
+    price_confirm_date: Optional[str] = None       # 공모가 확정공고일 (= [발행조건확정] 공시 공개일)
+    demand_forecast_start: Optional[str] = None    # 수요예측 시작일
+    demand_forecast_end: Optional[str] = None      # 수요예측 종료일
+
     warnings: list[str] = field(default_factory=list)
 
 
@@ -425,6 +430,54 @@ def extract_listing_date(xml: str) -> Optional[str]:
     return f"{int(m.group(1)):04d}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
 
 
+# ---------- 공모가 확정공고일 (지시 #20 / v1.1) ----------
+
+# "공모가액 확정공고 YYYY년 M월 D일" / "모집 또는 매출가액 확정의 공고 YYYY년 M월 D일" 등.
+# collect 가 명시 매치 실패 시 발행조건확정 접수일로 fallback.
+_RE_PRICE_CONFIRM_DATE = re.compile(
+    r"(?:공모가액|모집(?:\s*(?:또는|·|,)\s*매출)?\s*가액)"
+    r"\s*확정(?:의)?\s*공고(?:일)?"
+    r"[^\d]{0,20}"
+    r"(\d{4})\s*[-\.년]\s*(\d{1,2})\s*[-\.월]\s*(\d{1,2})\s*일?"
+)
+
+
+def extract_price_confirm_date(xml: str) -> Optional[str]:
+    """본문 명시 "공모가액 확정공고 YYYY-MM-DD" 등. 없으면 None."""
+    text = _strip_tags(xml)
+    m = _RE_PRICE_CONFIRM_DATE.search(text)
+    if not m:
+        return None
+    return f"{int(m.group(1)):04d}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+
+
+# ---------- 수요예측 기간 (지시 #20 / v1.1) ----------
+
+# "수요예측 기간: 2026년 10월 15일 ~ 2026년 10월 16일" / "수요예측기간 ..." / "기관투자자 수요예측 기간 ..."
+# 연도 반복 생략 포맷 수용: "2026년 10월 15일 ~ 10월 16일"
+_RE_DEMAND_FORECAST = re.compile(
+    r"수요예측\s*(?:실시)?\s*(?:기간)?"
+    r"[^\d<]{0,40}"
+    r"(\d{4})\s*[-\.년]\s*(\d{1,2})\s*[-\.월]\s*(\d{1,2})\s*일?"
+    r"\s*(?:~|부터|-)\s*"
+    r"(?:(\d{4})\s*[-\.년]\s*)?(\d{1,2})\s*[-\.월]\s*(\d{1,2})\s*일?"
+)
+
+
+def extract_demand_forecast_period(xml: str) -> tuple[Optional[str], Optional[str]]:
+    """본문 명시 수요예측 시작·종료일. 없으면 (None, None)."""
+    text = _strip_tags(xml)
+    m = _RE_DEMAND_FORECAST.search(text)
+    if not m:
+        return None, None
+    y1, mo1, d1 = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    y2 = int(m.group(4)) if m.group(4) else y1
+    mo2, d2 = int(m.group(5)), int(m.group(6))
+    start = f"{y1:04d}-{mo1:02d}-{d1:02d}"
+    end = f"{y2:04d}-{mo2:02d}-{d2:02d}"
+    return start, end
+
+
 # ---------- 모집·매출 구성 (신주·구주) ----------
 
 _RE_NEW_SHARES = re.compile(r"신주\s*모집[^0-9]{0,20}([0-9,]+)\s*주")
@@ -621,6 +674,12 @@ def parse(
         out.warnings.append(
             "의무보유확약 비율 테이블(다)에서 합계/미확약 수량을 집계하지 못함 — null 유지"
         )
+
+    # 지시 #20 / v1.1: 공모가 확정공고일 + 수요예측 기간 (명시 매치, 없으면 null)
+    out.price_confirm_date = extract_price_confirm_date(xml)
+    ds, de = extract_demand_forecast_period(xml)
+    out.demand_forecast_start = ds
+    out.demand_forecast_end = de
 
     # 메타 보조 로그
     if rcept_no:

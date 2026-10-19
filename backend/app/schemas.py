@@ -58,6 +58,10 @@ class IpoSummary(BaseModel):
     subscription_start: Optional[str] = None
     subscription_end: Optional[str] = None
     listing_date: Optional[str] = None                          # MVP: 항상 null
+    # v1.1 (지시 #20): 공모 일정 — PENDING/CORRECTION 종목 안내용
+    price_confirm_date: Optional[str] = None                    # 공모가 확정공고일 = [발행조건확정] 공시 공개일
+    demand_forecast_start: Optional[str] = None                 # 수요예측 시작일
+    demand_forecast_end: Optional[str] = None                   # 수요예측 종료일
     band_low: Optional[int] = None
     band_high: Optional[int] = None
     final_price: Optional[int] = None

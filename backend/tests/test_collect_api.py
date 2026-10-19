@@ -578,6 +578,59 @@ def test_issuance_supplement_skipped_when_both_already_present(client, monkeypat
     assert issuance_rcept not in downloads
 
 
+def test_price_confirm_date_falls_back_to_final_release_rcept_dt(client, monkeypatch, tmp_path):
+    """지시 #20: 본문에 '확정공고 YYYY-MM-DD' 명시가 없어도 **발행조건확정 공시의 접수일**이
+    price_confirm_date 로 저장된다. 명세: '이날 [발행조건확정] 공시로 기관 데이터 공개'."""
+    from app import collect as collect_mod, dart_client as _dc
+    monkeypatch.setattr(collect_mod, "CACHE_DIR", tmp_path / "cache")
+
+    final_disc = _disc("20261016000055", "[발행조건확정]증권신고서(지분증권)",
+                       "01543043", "티앤이코리아", rcept_dt="20261016")
+    monkeypatch.setattr(_dc, "list_disclosures", lambda **kw: _list_resp([final_disc]))
+    monkeypatch.setattr(_dc, "download_document_zip",
+                        lambda *, rcept_no, timeout=20.0: _zip_bytes(_MIN_XML))
+
+    client.post("/api/collect")
+    _wait_done(client)
+    d = client.get("/api/ipos/01543043").json()
+    # 명시 매치 없음(_MIN_XML 에 없음) → 접수일 fallback: "20261016" → "2026-10-16"
+    assert d["price_confirm_date"] == "2026-10-16"
+
+
+def test_price_confirm_date_prefers_parsed_explicit_over_fallback(client, monkeypatch, tmp_path):
+    """지시 #20: 본문에 명시 '공모가액 확정공고 YYYY-MM-DD' 가 있으면 그걸 **우선**(접수일 fallback 보다)."""
+    from app import collect as collect_mod, dart_client as _dc
+    monkeypatch.setattr(collect_mod, "CACHE_DIR", tmp_path / "cache")
+
+    final_disc = _disc("20261016000055", "[발행조건확정]증권신고서(지분증권)",
+                       "01543043", "티앤이코리아", rcept_dt="20261016")
+
+    # 본문에 명시: "공모가액 확정공고 2026년 10월 15일" (접수일 10/16 과 다르게 — 우선순위 확인)
+    xml = """<?xml version="1.0" encoding="utf-8"?>
+<DOC>
+<P>공모희망가액 범위(10,000원 ~ 12,000원)</P>
+<P>확정공모가액 12,000원</P>
+<P>본 공시 접수일 2026-10-16</P>
+<P>공모가액 확정공고 2026년 10월 15일</P>
+<P>수요예측 기간: 2026년 10월 13일 ~ 2026년 10월 14일</P>
+<P>청약기간: 2026년 10월 20일 ~ 2026년 10월 21일</P>
+<TR><TD>경쟁률</TD><TD>1</TD><TD>2</TD><TD>3</TD><TD>4</TD><TD>5</TD><TD>6</TD><TD>7</TD><TD>8</TD><TD>9</TD><TD>1200.00</TD></TR>
+<TR><TD>수량</TD><TD>1</TD><TD>2</TD><TD>3</TD><TD>4</TD><TD>5</TD><TD>6</TD><TD>7</TD><TD>8</TD><TD>9</TD><TD>500000</TD></TR>
+</DOC>
+"""
+    monkeypatch.setattr(_dc, "list_disclosures", lambda **kw: _list_resp([final_disc]))
+    monkeypatch.setattr(_dc, "download_document_zip",
+                        lambda *, rcept_no, timeout=20.0: _zip_bytes(xml))
+
+    client.post("/api/collect")
+    _wait_done(client)
+    d = client.get("/api/ipos/01543043").json()
+    # 명시 매치 우선
+    assert d["price_confirm_date"] == "2026-10-15"
+    assert d["demand_forecast_start"] == "2026-10-13"
+    assert d["demand_forecast_end"] == "2026-10-14"
+
+
 def test_list_disclosures_passes_corp_code(monkeypatch):
     """지시 #24: dart_client.list_disclosures(corp_code=...) 가 OpenDART 파라미터에 corp_code 를 그대로 전달,
     기본 호출에는 포함되지 않는다.

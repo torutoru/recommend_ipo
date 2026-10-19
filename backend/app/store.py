@@ -120,6 +120,10 @@ _MIGRATIONS: list[tuple[str, str, str]] = [
     # (table, column, DDL — "ALTER TABLE {table} ADD COLUMN {column} ..." 뒷부분)
     # 지시 #16: 파서 버전 추적 → 수집기가 코드 버전과 다르면 종목 재파싱 (DROP 없음, ADD COLUMN 만).
     ("ipos", "parser_version", "parser_version TEXT"),
+    # 지시 #20 / v1.1: 공모 일정
+    ("ipos", "price_confirm_date", "price_confirm_date TEXT"),
+    ("ipos", "demand_forecast_start", "demand_forecast_start TEXT"),
+    ("ipos", "demand_forecast_end", "demand_forecast_end TEXT"),
 ]
 
 
@@ -166,6 +170,9 @@ def upsert_ipo(
     offering_amount_krw: Optional[int],
     report_rcept_no: Optional[str],
     parser_version: Optional[str] = None,
+    price_confirm_date: Optional[str] = None,
+    demand_forecast_start: Optional[str] = None,
+    demand_forecast_end: Optional[str] = None,
 ) -> None:
     now = now_iso_kst()
     conn.execute(
@@ -176,8 +183,8 @@ def upsert_ipo(
             competition_rate, competition_rate_type, demand_quantity, demand_amount_krw,
             lockup_ratio, lockup_ratio_basis, tradable_ratio, old_share_ratio,
             new_share_count, old_share_count, total_offering_count, offering_amount_krw, report_rcept_no,
-            parser_version, updated_at
-        ) VALUES (?,?,?,?,?,?, ?,?,?,?, ?,?,?,?, ?,?,?,?, ?,?,?,?,?, ?,?)
+            parser_version, price_confirm_date, demand_forecast_start, demand_forecast_end, updated_at
+        ) VALUES (?,?,?,?,?,?, ?,?,?,?, ?,?,?,?, ?,?,?,?, ?,?,?,?,?, ?,?,?,?,?)
         ON CONFLICT(corp_code) DO UPDATE SET
             -- 지시 #22: 재파싱이 기존 데이터를 null 로 덮는 사고 방지.
             -- excluded.col IS NOT NULL 일 때만 교체. corp_name·updated_at·parser_version 은 항상 갱신.
@@ -203,6 +210,9 @@ def upsert_ipo(
             total_offering_count  = COALESCE(excluded.total_offering_count, ipos.total_offering_count),
             offering_amount_krw   = COALESCE(excluded.offering_amount_krw, ipos.offering_amount_krw),
             report_rcept_no       = COALESCE(excluded.report_rcept_no, ipos.report_rcept_no),
+            price_confirm_date    = COALESCE(excluded.price_confirm_date, ipos.price_confirm_date),
+            demand_forecast_start = COALESCE(excluded.demand_forecast_start, ipos.demand_forecast_start),
+            demand_forecast_end   = COALESCE(excluded.demand_forecast_end, ipos.demand_forecast_end),
             parser_version=excluded.parser_version,
             updated_at=excluded.updated_at
         """,
@@ -212,7 +222,7 @@ def upsert_ipo(
             competition_rate, competition_rate_type, demand_quantity, demand_amount_krw,
             lockup_ratio, lockup_ratio_basis, tradable_ratio, old_share_ratio,
             new_share_count, old_share_count, total_offering_count, offering_amount_krw, report_rcept_no,
-            parser_version, now,
+            parser_version, price_confirm_date, demand_forecast_start, demand_forecast_end, now,
         ),
     )
 

@@ -63,6 +63,10 @@ def _detail_from_row(row: dict, shares: int) -> IpoDetail:
         subscription_start=row.get("subscription_start"),
         subscription_end=row.get("subscription_end"),
         listing_date=row.get("listing_date"),         # v0.4
+        # v1.1 (지시 #20): 공모 일정 — IpoSummary 레벨 필드
+        price_confirm_date=row.get("price_confirm_date"),
+        demand_forecast_start=row.get("demand_forecast_start"),
+        demand_forecast_end=row.get("demand_forecast_end"),
         band_low=row.get("band_low"),
         band_high=row.get("band_high"),
         final_price=row.get("final_price"),
