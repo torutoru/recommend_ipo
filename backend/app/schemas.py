@@ -5,7 +5,13 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 
-Status = Literal["PENDING", "INCOMPLETE", "PASS", "REJECT"]   # v1.0 — INCOMPLETE 추가
+Status = Literal[
+    "PENDING",
+    "INCOMPLETE",       # v1.0
+    "CORRECTION",       # v0.8 (지시 #17) — 금감원 정정신고서 제출요구 있음 + 발행조건확정 없음
+    "PASS",
+    "REJECT",
+]
 Grade = Literal["S", "A", "B"]                                 # v0.3: C 삭제
 PricePosition = Literal[
     "ABOVE_BAND",
@@ -19,6 +25,7 @@ DocType = Literal[
     "PROSPECTUS_AMENDED",
     "REGISTRATION_AMENDED",
     "ISSUANCE_REPORT",
+    "CORRECTION_REQUEST",   # v0.8 (지시 #17) — 금감원 "정정신고서 제출요구" 공시
 ]
 CompetitionRateType = Literal["simple", "weighted"]
 LockupBasis = Literal["allocated", "applied"]
@@ -32,6 +39,8 @@ ChecklistKey = Literal[
     "sell_timing",
 ]
 ChecklistResult = Literal["MET", "NOT_MET", "UNKNOWN", "INFO"]
+# v0.9 (지시 #18): competition 전용 — "좋음"/"아주 좋음" 2단계 표시
+ChecklistLevel = Literal["GOOD", "VERY_GOOD"]
 
 
 class ScoreRange(BaseModel):
@@ -44,11 +53,22 @@ class ScoreRange(BaseModel):
     max: int = Field(ge=0, le=100)
 
 
+class CorrectionInfo(BaseModel):
+    """v0.8 (지시 #17): 금감원 정정신고서 제출요구 정보.
+
+    `requested_at`: 정정신고서 제출요구일 (YYYY-MM-DD)
+    `amended_at`: 그 이후 발행사가 제출한 정정신고서 접수일 (아직 없으면 null)
+    """
+    requested_at: str
+    amended_at: Optional[str] = None
+
+
 class Verdict(BaseModel):
     status: Status
     grade: Optional[Grade] = None
     score: Optional[int] = Field(default=None, ge=0, le=100)
     score_range: Optional[ScoreRange] = None   # v1.4 (지시 #27)
+    correction: Optional[CorrectionInfo] = None   # v0.8 (지시 #17)
 
 
 class IpoSummary(BaseModel):
@@ -114,6 +134,7 @@ class ChecklistItem(BaseModel):
     criterion: str
     actual: Optional[str] = None
     result: ChecklistResult
+    level: Optional[ChecklistLevel] = None   # v0.9 (지시 #18): competition 만 설정
 
 
 class IpoDetail(IpoSummary):

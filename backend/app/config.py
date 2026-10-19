@@ -133,7 +133,12 @@ class DepositConfig(BaseModel):
 
 
 class ChecklistConfig(BaseModel):
+    # v0.9 (지시 #18): competition 은 2단계
+    # ≥ competition_good_min → MET + level=GOOD, ≥ competition_very_good_min → MET + level=VERY_GOOD, 미만 → NOT_MET
+    # 기존 competition_min 은 하위 호환으로 남겨두되 build_checklist 는 쓰지 않음(competition_good_min 과 동일 값 유지).
     competition_min: float
+    competition_good_min: float = 1000.0
+    competition_very_good_min: float = 1500.0
     price_positions_met: list[PricePositionKey]
     lockup_min: float
     flow_tradable_max: float

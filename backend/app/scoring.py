@@ -23,6 +23,7 @@ from typing import Optional
 from .config import ScoringConfig
 from .schemas import (
     ChecklistItem,
+    CorrectionInfo,
     Grade,
     IpoDetail,
     IpoSummary,
@@ -44,6 +45,7 @@ class EvaluationResult:
     reasons: list[str]
     reject_reasons: list[str]
     score_range: Optional[tuple[int, int]] = None   # v1.4 (지시 #27)
+    correction: Optional[CorrectionInfo] = None     # v0.8 (지시 #17)
 
 
 # ---------- PENDING ----------
@@ -257,12 +259,35 @@ def _incomplete_reasons(ind: Indicators) -> list[str]:
 
 # ---------- 공개 API ----------
 
-def evaluate(ind: Indicators, cfg: ScoringConfig) -> EvaluationResult:
+def evaluate(
+    ind: Indicators,
+    cfg: ScoringConfig,
+    *,
+    correction: Optional[CorrectionInfo] = None,
+) -> EvaluationResult:
     """지표를 받아 상태·점수·등급·근거를 계산.
 
+    v0.8 (지시 #17): 정정요구 정보가 전달되면 PENDING 보다 먼저 CORRECTION 반환.
+      우선순위: 철회(store 처리) → **CORRECTION** → PENDING → INCOMPLETE → PASS/REJECT.
     v1.4 (지시 #27): 미확인 지표가 있어도 가능 점수 범위 [min,max] 가 pass_min 기준 한쪽으로
-    쏠리면 PASS/REJECT 로 확정. 걸쳐 있으면 INCOMPLETE.
+      쏠리면 PASS/REJECT 로 확정. 걸쳐 있으면 INCOMPLETE.
     """
+    if correction is not None:
+        amend_note = (
+            f" / 기재정정 {correction.amended_at} 접수" if correction.amended_at else ""
+        )
+        return EvaluationResult(
+            status="CORRECTION",
+            grade=None,
+            scores=Scores(),
+            reasons=[
+                f"금감원 정정신고서 제출요구 {correction.requested_at}{amend_note} — "
+                "일정이 다시 잡힐 수 있으므로 판정 대기"
+            ],
+            reject_reasons=[],
+            correction=correction,
+        )
+
     if _is_pending(ind):
         return EvaluationResult(
             status="PENDING",
@@ -432,21 +457,30 @@ def build_checklist(
     cl = cfg.checklist
     items: list[ChecklistItem] = []
 
-    # 1) competition
+    # 1) competition (v0.9 지시 #18: 2단계)
     actual = _fmt_rate(ind)
+    comp_level = None
     if ind.competition_rate is None:
         comp_result = "UNKNOWN"
-    elif ind.competition_rate >= cl.competition_min:
+    elif ind.competition_rate >= cl.competition_very_good_min:
         comp_result = "MET"
+        comp_level = "VERY_GOOD"
+    elif ind.competition_rate >= cl.competition_good_min:
+        comp_result = "MET"
+        comp_level = "GOOD"
     else:
         comp_result = "NOT_MET"
     items.append(ChecklistItem(
         key="competition",
         label="기관 경쟁률",
         indicator="기관 수요예측 경쟁률",
-        criterion=f"{cl.competition_min:,.0f}:1 이상",
+        criterion=(
+            f"{cl.competition_good_min:,.0f}:1 이상 좋음 · "
+            f"{cl.competition_very_good_min:,.0f}:1 이상 아주 좋음"
+        ),
         actual=actual,
         result=comp_result,
+        level=comp_level,
     ))
 
     # 2) price_position
@@ -556,6 +590,7 @@ def summary_from_detail(detail: IpoDetail) -> IpoSummary:
 def build_verdict(result: EvaluationResult) -> Verdict:
     """v1.4: PASS/REJECT 가 전지표 확정이면 score=scores.total, score_range=null.
     범위로 확정된 경우에는 score=null, score_range={min,max}. grade 는 PASS 일 때만.
+    v0.8 (지시 #17): CORRECTION 상태면 verdict.correction 에 정정요구/정정신고서 접수일 노출.
     """
     score_range: Optional[ScoreRange] = None
     if result.score_range is not None:
@@ -565,4 +600,5 @@ def build_verdict(result: EvaluationResult) -> Verdict:
         grade=result.grade,
         score=result.scores.total,
         score_range=score_range,
+        correction=result.correction,
     )

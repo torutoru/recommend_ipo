@@ -10,7 +10,7 @@ from app.scoring import (
     calc_min_deposit,
     evaluate,
 )
-from app.schemas import Indicators
+from app.schemas import CorrectionInfo, Indicators
 
 
 def _ind(**over):
@@ -439,6 +439,51 @@ def test_27_verdict_score_range_null_when_all_confirmed(cfg):
     assert v.score_range is None
 
 
+# ---------------------- 지시 #17: CORRECTION 상태 ----------------------
+
+def test_17_correction_overrides_pending(cfg):
+    """정정요구 정보가 있으면 PENDING 보다 먼저 CORRECTION. 지표가 null 이든 아니든 무관."""
+    corr = CorrectionInfo(requested_at="2026-09-30", amended_at=None)
+    r = evaluate(_ind(competition_rate=None, price_position=None), cfg, correction=corr)
+    assert r.status == "CORRECTION"
+    assert r.grade is None
+    assert r.scores.total is None
+    assert r.correction is not None
+    assert r.correction.requested_at == "2026-09-30"
+    assert r.correction.amended_at is None
+    assert any("정정신고서 제출요구" in line for line in r.reasons)
+
+
+def test_17_correction_overrides_pass(cfg):
+    """정정요구가 있으면 지표가 모두 PASS 수준이어도 CORRECTION 로 가린다 (일정 자체 미확정)."""
+    corr = CorrectionInfo(requested_at="2026-09-30", amended_at="2026-10-05")
+    r = evaluate(_ind(), cfg, correction=corr)
+    assert r.status == "CORRECTION"
+    assert r.correction is not None
+    assert r.correction.amended_at == "2026-10-05"
+    assert any("기재정정 2026-10-05" in line for line in r.reasons)
+
+
+def test_17_no_correction_normal_evaluation(cfg):
+    """correction=None 전달이면 기존 로직(PASS/REJECT/INCOMPLETE)."""
+    r = evaluate(_ind(), cfg, correction=None)
+    assert r.status == "PASS"
+    assert r.correction is None
+
+
+def test_17_build_verdict_carries_correction(cfg):
+    """build_verdict 가 correction 정보를 Verdict.correction 에 그대로 노출."""
+    corr = CorrectionInfo(requested_at="2026-09-30", amended_at="2026-10-05")
+    r = evaluate(_ind(), cfg, correction=corr)
+    v = build_verdict(r)
+    assert v.status == "CORRECTION"
+    assert v.correction is not None
+    assert v.correction.requested_at == "2026-09-30"
+    assert v.correction.amended_at == "2026-10-05"
+    assert v.score is None
+    assert v.grade is None
+
+
 # ---------------------- 증거금 v0.3 ----------------------
 
 def test_min_deposit_includes_fee_and_total(cfg):
@@ -567,6 +612,68 @@ def test_checklist_sell_timing_with_listing_date(cfg):
     cl = build_checklist(_ind(), md, cfg, listing_date="2026-12-05")
     by_key = {c.key: c for c in cl}
     assert by_key["sell_timing"].actual == "상장일 2026-12-05"
+
+
+# ---------------------- 지시 #18: 체크리스트 경쟁률 2단계 ----------------------
+
+def _checklist_comp(cfg, rate):
+    md = calc_min_deposit(10000, 10, cfg)
+    cl = build_checklist(_ind(competition_rate=rate), md, cfg)
+    return next(c for c in cl if c.key == "competition")
+
+
+def test_18_competition_level_very_good_at_1500(cfg):
+    """경계 1500 — VERY_GOOD 'MET'."""
+    c = _checklist_comp(cfg, 1500.0)
+    assert c.result == "MET"
+    assert c.level == "VERY_GOOD"
+
+
+def test_18_competition_level_good_just_above_1000(cfg):
+    """경계 1000 → GOOD MET (1499.9 도 GOOD, 1500 미만)."""
+    c = _checklist_comp(cfg, 1000.0)
+    assert c.result == "MET"
+    assert c.level == "GOOD"
+    c2 = _checklist_comp(cfg, 1499.9)
+    assert c2.result == "MET"
+    assert c2.level == "GOOD"
+
+
+def test_18_competition_level_not_met_below_1000(cfg):
+    """999.9 → NOT_MET, level 없음."""
+    c = _checklist_comp(cfg, 999.9)
+    assert c.result == "NOT_MET"
+    assert c.level is None
+
+
+def test_18_competition_level_unknown_when_null(cfg):
+    """null → UNKNOWN, level 없음."""
+    c = _checklist_comp(cfg, None)
+    assert c.result == "UNKNOWN"
+    assert c.level is None
+
+
+def test_18_competition_criterion_text_two_tier(cfg):
+    """criterion 문구: '1,000:1 이상 좋음 · 1,500:1 이상 아주 좋음'."""
+    c = _checklist_comp(cfg, 2000.0)
+    assert "1,000:1 이상 좋음" in c.criterion
+    assert "1,500:1 이상 아주 좋음" in c.criterion
+
+
+def test_18_tnec_1041_is_met_good(cfg):
+    """티앤이코리아 실측(rate 1041) → 체크리스트 MET + level=GOOD (운영 상세에서 '✗ 불만족' 사라져야 함)."""
+    c = _checklist_comp(cfg, 1041.02)
+    assert c.result == "MET"
+    assert c.level == "GOOD"
+
+
+def test_18_other_items_still_have_no_level(cfg):
+    """level 은 competition 전용. 다른 항목은 None 유지."""
+    md = calc_min_deposit(10000, 10, cfg)
+    cl = build_checklist(_ind(), md, cfg)
+    for item in cl:
+        if item.key != "competition":
+            assert item.level is None
 
 
 def test_checklist_criterion_min_deposit_from_config(cfg):

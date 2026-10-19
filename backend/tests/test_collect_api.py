@@ -631,6 +631,86 @@ def test_price_confirm_date_prefers_parsed_explicit_over_fallback(client, monkey
     assert d["demand_forecast_end"] == "2026-10-14"
 
 
+def test_correction_notice_marks_correction_davio_shape(client, monkeypatch, tmp_path):
+    """지시 #17 (pm 수정): 다비오 형태 — [정정제출요구] 접두 신고서(회사 원 신고서) +
+    "정정신고서제출요구( ... )" 공지 + [기재정정] 신고서(회사 재제출). 발행조건확정 없음.
+    → CORRECTION, requested_at = 공지 접수일(10/06), amended_at = 기재정정 접수일(10/08)."""
+    from app import collect as collect_mod, dart_client as _dc
+    monkeypatch.setattr(collect_mod, "CACHE_DIR", tmp_path / "cache")
+
+    bracket_doc = _disc("20260915000390", "[정정제출요구]증권신고서(지분증권)",
+                        "01888888", "다비오", rcept_dt="20260915")   # 회사 원 신고서
+    notice = _disc("20261006100034",
+                   "정정신고서제출요구( 2026.09.15. 제출 증권신고서(지분증권) )",
+                   "01888888", "다비오", rcept_dt="20261006")        # 금감원 공지
+    amended = _disc("20261008000705", "[기재정정]증권신고서(지분증권)",
+                    "01888888", "다비오", rcept_dt="20261008")
+
+    monkeypatch.setattr(_dc, "list_disclosures",
+                        lambda **kw: _list_resp([bracket_doc, notice, amended]))
+    monkeypatch.setattr(_dc, "download_document_zip",
+                        lambda *, rcept_no, timeout=20.0: _zip_bytes(_MIN_XML))
+
+    client.post("/api/collect")
+    _wait_done(client)
+    d = client.get("/api/ipos/01888888").json()
+    assert d["verdict"]["status"] == "CORRECTION"
+    assert d["verdict"]["correction"]["requested_at"] == "2026-10-06"   # 공지일, not 신고서 접수일
+    assert d["verdict"]["correction"]["amended_at"] == "2026-10-08"
+    # 접두 '[정정제출요구]' 신고서는 **정본 후보로 유지**됨 → sources 에 REGISTRATION_AMENDED 로 포함
+    source_types = {s["doc_type"] for s in d["sources"]}
+    assert "REGISTRATION_AMENDED" in source_types
+    assert "CORRECTION_REQUEST" in source_types
+
+
+def test_correction_fallback_to_bracket_prefix_when_no_notice(client, monkeypatch, tmp_path):
+    """공지 공시가 못 잡힌 경우(유캐스트 유사 상태) — fallback 로 접두 '[정정제출요구]' 신고서 접수일 사용 + warning 명시."""
+    from app import collect as collect_mod, dart_client as _dc
+    monkeypatch.setattr(collect_mod, "CACHE_DIR", tmp_path / "cache")
+
+    bracket_only = _disc("20260909000378", "[정정제출요구]증권신고서(지분증권)",
+                         "01777777", "유캐스트", rcept_dt="20260909")
+
+    monkeypatch.setattr(_dc, "list_disclosures",
+                        lambda **kw: _list_resp([bracket_only]))
+    monkeypatch.setattr(_dc, "download_document_zip",
+                        lambda *, rcept_no, timeout=20.0: _zip_bytes(_MIN_XML))
+
+    client.post("/api/collect")
+    _wait_done(client)
+    d = client.get("/api/ipos/01777777").json()
+    assert d["verdict"]["status"] == "CORRECTION"
+    # 공지 없음 → fallback = 신고서 접수일(접두 '[정정제출요구]')
+    assert d["verdict"]["correction"]["requested_at"] == "2026-09-09"
+    assert d["verdict"]["correction"]["amended_at"] is None
+    # 접두 신고서는 REGISTRATION_AMENDED 로 정본 후보 유지
+    assert "REGISTRATION_AMENDED" in {s["doc_type"] for s in d["sources"]}
+
+
+def test_correction_cleared_when_final_release_comes_after(client, monkeypatch, tmp_path):
+    """지시 #17: 정정요구 이후 발행조건확정이 들어오면 CORRECTION 아님(정상 PASS/REJECT 평가)."""
+    from app import collect as collect_mod, dart_client as _dc
+    monkeypatch.setattr(collect_mod, "CACHE_DIR", tmp_path / "cache")
+
+    bracket_doc = _disc("20260915000390", "[정정제출요구]증권신고서(지분증권)",
+                        "01999999", "다비오", rcept_dt="20260915")
+    notice = _disc("20261006100034", "정정신고서제출요구( 2026.09.15. 제출 증권신고서(지분증권) )",
+                   "01999999", "다비오", rcept_dt="20261006")
+    final = _disc("20261010000044", "[발행조건확정]증권신고서(지분증권)",
+                  "01999999", "다비오", rcept_dt="20261010")
+
+    monkeypatch.setattr(_dc, "list_disclosures",
+                        lambda **kw: _list_resp([bracket_doc, notice, final]))
+    monkeypatch.setattr(_dc, "download_document_zip",
+                        lambda *, rcept_no, timeout=20.0: _zip_bytes(_MIN_XML))
+
+    client.post("/api/collect")
+    _wait_done(client)
+    d = client.get("/api/ipos/01999999").json()
+    assert d["verdict"]["status"] != "CORRECTION"
+    assert d["verdict"]["correction"] is None
+
+
 def test_list_disclosures_passes_corp_code(monkeypatch):
     """지시 #24: dart_client.list_disclosures(corp_code=...) 가 OpenDART 파라미터에 corp_code 를 그대로 전달,
     기본 호출에는 포함되지 않는다.

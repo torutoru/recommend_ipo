@@ -43,7 +43,7 @@ def list_disclosures(
     *,
     bgn_de: str,
     end_de: str,
-    pblntf_detail_ty: str = "C001",
+    pblntf_detail_ty: Optional[str] = "C001",
     last_reprt_at: str = "N",
     page_count: int = 100,
     page_no: int = 1,
@@ -52,18 +52,20 @@ def list_disclosures(
 ) -> dict:
     """공시 검색. 기본은 C001(지분증권 증권신고서).
 
-    corp_code 가 주어지면 해당 종목만 조회(지시 #24: 재파싱 때 종목 전체 이력 조회).
+    corp_code 가 주어지면 해당 종목만 조회(지시 #24).
+    pblntf_detail_ty 가 None 이면 유형 필터 없이 조회(지시 #17 수정: 금감원 "정정신고서제출요구" 공지 포함).
     """
     _throttle()
     params: dict = {
         "crtfc_key": _key(),
         "bgn_de": bgn_de,
         "end_de": end_de,
-        "pblntf_detail_ty": pblntf_detail_ty,
         "last_reprt_at": last_reprt_at,
         "page_count": page_count,
         "page_no": page_no,
     }
+    if pblntf_detail_ty:
+        params["pblntf_detail_ty"] = pblntf_detail_ty
     if corp_code:
         params["corp_code"] = corp_code
     r = httpx.get(f"{DART_API}/list.json", params=params, timeout=timeout)

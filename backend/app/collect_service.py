@@ -104,14 +104,19 @@ def _date_range() -> tuple[str, str]:
     return bgn.strftime(fmt), end.strftime(fmt)
 
 
-def _fetch_list(bgn: str, end: str, corp_code: Optional[str] = None) -> list[dict]:
-    """OpenDART C001 공시 전체(pagination). corp_code 가 주어지면 그 종목만 조회(#24)."""
+def _fetch_list(
+    bgn: str, end: str,
+    corp_code: Optional[str] = None,
+    pblntf_detail_ty: Optional[str] = "C001",
+) -> list[dict]:
+    """OpenDART 공시 전체(pagination). corp_code 가 주어지면 그 종목만 조회(#24).
+    pblntf_detail_ty=None 이면 유형 필터 없이 조회(#17 수정: 금감원 요구 공지 포함)."""
     all_items: list[dict] = []
     page_no = 1
     while True:
         resp = dart_client.list_disclosures(
             bgn_de=bgn, end_de=end,
-            pblntf_detail_ty="C001",
+            pblntf_detail_ty=pblntf_detail_ty,
             last_reprt_at="N",
             page_count=100,
             page_no=page_no,
@@ -136,12 +141,14 @@ def _fetch_corp_history(corp_code: str) -> list[dict]:
 
     증분 범위 안 문서만 보면 발행조건확정이 과거라 빠지고 ISSUANCE_REPORT 만 보여서 지표가 null 로
     바뀌는 사고 방지. corp_code 를 OpenDART list.json 에 넘겨 그 종목만 받아 온다.
+    지시 #17 수정: 유형 필터 없이 조회 — "정정신고서제출요구( ... )" 공지도 포함.
     """
     s = get_settings()
     end = now_kst()
     bgn = end - timedelta(days=s.full_history_days)
     fmt = "%Y%m%d"
-    return _fetch_list(bgn.strftime(fmt), end.strftime(fmt), corp_code=corp_code)
+    return _fetch_list(bgn.strftime(fmt), end.strftime(fmt),
+                       corp_code=corp_code, pblntf_detail_ty=None)
 
 
 def _run_safely() -> None:
@@ -221,8 +228,12 @@ def _run() -> None:
                         f"종목 전체 이력 조회 실패 — {_sanitize_error(fe)} / 증분 범위로 fallback",
                     )
                 if full_items:
-                    # IPO 후보 필터 통과한 공시만 사용(증분과 동일 기준)
-                    filtered_full = [it for it in full_items if collect_mod.is_ipo_candidate(it)]
+                    # IPO 후보 필터 통과한 공시 + 금감원 "정정신고서제출요구" 공지(지시 #17 수정) 포함
+                    filtered_full = [
+                        it for it in full_items
+                        if collect_mod.is_ipo_candidate(it)
+                        or collect_mod.classify_report(it.get("report_nm", "")) == "CORRECTION_REQUEST"
+                    ]
                     if filtered_full:
                         items_for_process = sorted(
                             filtered_full, key=lambda d: d.get("rcept_dt", "")

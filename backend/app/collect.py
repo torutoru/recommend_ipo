@@ -53,7 +53,8 @@ DART_URL = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo="
 #   v5 — 지시 #25 (실적보고서 상장일(매매개시일)·상장구분 파싱 + ISSUANCE_REPORT 보강)
 #   v6 — 지시 #26 (삼성증권 형식 — 확약 섹션 "의무보유 확약 신청내역" 수용 + 유통 서술형 역순)
 #   v7 — 지시 #20 (공모가 확정공고일·수요예측 기간 — 명시 매치 + 발행조건확정 접수일 fallback)
-PARSER_VERSION = "v7"
+#   v8 — 지시 #17 (CORRECTION 상태 — 정정요구/기재정정 접수일 추적)
+PARSER_VERSION = "v8"
 
 
 # ---------- 분류 ----------
@@ -65,8 +66,12 @@ DOC_TYPE_RULES: list[tuple[re.Pattern, str]] = [
     (re.compile(r"\[기재정정\]증권발행실적보고서"), "ISSUANCE_REPORT"),
     (re.compile(r"증권발행실적보고서"), "ISSUANCE_REPORT"),
     (re.compile(r"투자설명서"), "PROSPECTUS"),
+    # 지시 #17 수정 (pm 피드백): 금감원 "정정신고서제출요구( ... )" 공지는 접두 괄호 없이 "정정신고서제출요구" 로 시작.
+    # (주의: "[정정제출요구]" 접두가 붙은 문서는 **회사가 낸 원 신고서** 로서 정본 후보.)
+    (re.compile(r"^정정신고서제출요구"), "CORRECTION_REQUEST"),
     (re.compile(r"\[발행조건확정\]증권신고서\(지분증권\)"), "REGISTRATION_AMENDED"),
     (re.compile(r"\[기재정정\]증권신고서\(지분증권\)"), "REGISTRATION_AMENDED"),
+    # 지시 #17 수정: "[정정제출요구]증권신고서" 는 회사가 낸 원 신고서 → 정본 후보로 유지(REGISTRATION_AMENDED)
     (re.compile(r"\[정정제출요구\]증권신고서\(지분증권\)"), "REGISTRATION_AMENDED"),
     (re.compile(r"증권신고서\(지분증권\)"), "REGISTRATION_AMENDED"),
 ]
@@ -229,8 +234,63 @@ def process_corp(
         for s in raw_sources
     ]
 
+    # 지시 #17 (pm 수정 피드백 반영): 정정요구 추적 — 두 단계 소스.
+    # 1차: "정정신고서제출요구( ... )" **공지** 접수일(CORRECTION_REQUEST).
+    # 2차 fallback: 공지 공시가 못 잡혔으면(조회 안 됨) 접두 "[정정제출요구]" 가 붙은 **원 신고서** 접수일.
+    #   접두 '[정정제출요구]' 는 회사가 낸 원 신고서이므로 정본 후보로 유지되고 분류는 REGISTRATION_AMENDED,
+    #   정정요구 '발생' 자체는 이 접두가 증거.
+    # 이후 발행조건확정이 그 날짜 이후면 correction 상태 아님(정상 평가).
+    correction_requested_at: Optional[str] = None
+    correction_amended_at: Optional[str] = None
+    correction_warning: Optional[str] = None
+
+    corr_notices = [s for s in raw_sources if s["doc_type"] == "CORRECTION_REQUEST"]
+    corr_req_date_raw: Optional[str] = None
+    corr_source_label: Optional[str] = None   # "notice" 또는 "bracket"
+    if corr_notices:
+        latest = max(corr_notices, key=lambda s: s["disclosure"].get("rcept_dt", ""))
+        corr_req_date_raw = latest["disclosure"].get("rcept_dt", "")
+        corr_source_label = "notice"
+    else:
+        # 2차 fallback: 접두 '[정정제출요구]' 를 가진 회사 신고서
+        bracket_regs = [
+            s for s in raw_sources
+            if s["doc_type"] == "REGISTRATION_AMENDED"
+            and "[정정제출요구]" in s["disclosure"].get("report_nm", "")
+        ]
+        if bracket_regs:
+            latest = max(bracket_regs, key=lambda s: s["disclosure"].get("rcept_dt", ""))
+            corr_req_date_raw = latest["disclosure"].get("rcept_dt", "")
+            corr_source_label = "bracket"
+
+    if corr_req_date_raw:
+        has_final_after = any(
+            is_final_release(s["disclosure"].get("report_nm", ""))
+            and (s["disclosure"].get("rcept_dt", "") or "") > corr_req_date_raw
+            for s in raw_sources
+        )
+        if not has_final_after:
+            correction_requested_at = _dash_date(corr_req_date_raw) or None
+            if corr_source_label == "bracket":
+                correction_warning = (
+                    f"정정요구 공지 공시 미발견 — 접두 '[정정제출요구]' 신고서 접수일 "
+                    f"({correction_requested_at}) 기준"
+                )
+            # 그 이후 기재정정(발행사 재제출) 중 최신
+            amends_after = [
+                s for s in raw_sources
+                if s["doc_type"] == "REGISTRATION_AMENDED"
+                and "[기재정정]" in s["disclosure"].get("report_nm", "")
+                and (s["disclosure"].get("rcept_dt", "") or "") > corr_req_date_raw
+            ]
+            if amends_after:
+                latest_amend = max(amends_after, key=lambda s: s["disclosure"].get("rcept_dt", ""))
+                correction_amended_at = _dash_date(latest_amend["disclosure"].get("rcept_dt", "")) or None
+
     status = "PENDING"
     parsed_warnings: list[str] = []
+    if correction_warning:
+        parsed_warnings.append(correction_warning)
     row: dict = {
         "corp_code": corp_code,
         "corp_name": corp_name,
@@ -260,6 +320,9 @@ def process_corp(
         "price_confirm_date": None,
         "demand_forecast_start": None,
         "demand_forecast_end": None,
+        # v0.8 (지시 #17): 정정요구 정보 — CORRECTION 상태 판정 데이터
+        "correction_requested_at": correction_requested_at,
+        "correction_amended_at": correction_amended_at,
     }
 
     if core is None:

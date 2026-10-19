@@ -55,7 +55,10 @@ deposit:
   fee_krw: 2000
 
 checklist:
-  competition_min: 1500.0            # ≥ 이면 MET
+  # v0.9 (지시 #18): competition 2단계
+  competition_min: 1000.0            # 하위 호환(= competition_good_min)
+  competition_good_min: 1000.0       # ≥ 이면 MET + level=GOOD "좋음"
+  competition_very_good_min: 1500.0  # ≥ 이면 MET + level=VERY_GOOD "아주 좋음"
   price_positions_met: [TOP_OF_BAND, ABOVE_BAND]
   lockup_min: 10.0                   # ≥ 이면 MET
   flow_tradable_max: 35.0            # 유통 ≤ 이고

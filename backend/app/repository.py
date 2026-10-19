@@ -11,6 +11,7 @@ from typing import Optional
 from .config import get_scoring_config, get_settings
 from .time_utils import now_iso_kst
 from .schemas import (
+    CorrectionInfo,
     Indicators,
     IpoDetail,
     IpoSummary,
@@ -50,10 +51,19 @@ def _sources_from_row(row: dict) -> list[SourceDoc]:
     return [SourceDoc.model_validate(s) for s in row.get("sources", [])]
 
 
+def _correction_from_row(row: dict) -> Optional[CorrectionInfo]:
+    """v0.8 (지시 #17): row.correction_requested_at 이 있으면 CorrectionInfo. 없으면 None."""
+    requested = row.get("correction_requested_at")
+    if not requested:
+        return None
+    return CorrectionInfo(requested_at=requested, amended_at=row.get("correction_amended_at"))
+
+
 def _detail_from_row(row: dict, shares: int) -> IpoDetail:
     cfg = get_scoring_config()
     ind = _indicators_from_row(row)
-    result = evaluate(ind, cfg)
+    correction = _correction_from_row(row)
+    result = evaluate(ind, cfg, correction=correction)
     deposit = calc_min_deposit(row.get("final_price"), shares, cfg)
     checklist = build_checklist(ind, deposit, cfg, listing_date=row.get("listing_date"))
     return IpoDetail(
