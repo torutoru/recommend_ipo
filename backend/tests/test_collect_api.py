@@ -631,6 +631,36 @@ def test_price_confirm_date_prefers_parsed_explicit_over_fallback(client, monkey
     assert d["demand_forecast_end"] == "2026-10-14"
 
 
+def test_underwriters_persisted_and_returned(client, monkeypatch, tmp_path):
+    """지시 #21: process_corp 가 추출한 underwriters 가 저장되어 IpoDetail 응답에 노출."""
+    from app import collect as collect_mod, dart_client as _dc
+    monkeypatch.setattr(collect_mod, "CACHE_DIR", tmp_path / "cache")
+
+    disc = _disc("20261012000308", "[발행조건확정]증권신고서(지분증권)",
+                 "01444444", "티앤이코리아", rcept_dt="20261012")
+    xml = (
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<DOC>'
+        '<P>공모희망가액 범위(10,000원 ~ 12,000원)</P>'
+        '<P>확정공모가액 12,000원</P>'
+        '<P>본 공시 접수일 2026-10-12</P>'
+        '<P>대표주관회사인 신한투자증권주식회사</P>'
+        '<P>인수회사 하나증권이 참여합니다.</P>'
+        '<P>청약기간: 2026년 10월 20일 ~ 2026년 10월 21일</P>'
+        '<TR><TD>경쟁률</TD><TD>1</TD><TD>2</TD><TD>3</TD><TD>4</TD><TD>5</TD><TD>6</TD><TD>7</TD><TD>8</TD><TD>9</TD><TD>1200.00</TD></TR>'
+        '<TR><TD>수량</TD><TD>1</TD><TD>2</TD><TD>3</TD><TD>4</TD><TD>5</TD><TD>6</TD><TD>7</TD><TD>8</TD><TD>9</TD><TD>500000</TD></TR>'
+        '</DOC>'
+    )
+    monkeypatch.setattr(_dc, "list_disclosures", lambda **kw: _list_resp([disc]))
+    monkeypatch.setattr(_dc, "download_document_zip",
+                        lambda *, rcept_no, timeout=20.0: _zip_bytes(xml))
+
+    client.post("/api/collect")
+    _wait_done(client)
+    d = client.get("/api/ipos/01444444").json()
+    assert d["underwriters"] == ["신한투자증권", "하나증권"]
+
+
 def test_fss_notice_rcept_no_detection():
     """지시 #28: 접수번호 9~10번째 '10' 이면 금감원 공지 — 다운로드/정본에서 제외."""
     from app.collect import _is_fss_notice_rcept_no

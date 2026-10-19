@@ -55,7 +55,8 @@ DART_URL = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo="
 #   v7 — 지시 #20 (공모가 확정공고일·수요예측 기간 — 명시 매치 + 발행조건확정 접수일 fallback)
 #   v8 — 지시 #17 (CORRECTION 상태 — 정정요구/기재정정 접수일 추적)
 #   v9 — 지시 #28 (공지 다운로드 가드 + DB stale-only 재처리 + 투자설명서 수요예측 보강)
-PARSER_VERSION = "v9"
+#   v10 — 지시 #21(주관사 서술 추출) + #75aebc23 (확정가 전 공모 금액 null)
+PARSER_VERSION = "v10"
 
 
 # ---------- 분류 ----------
@@ -339,6 +340,8 @@ def process_corp(
         # v0.8 (지시 #17): 정정요구 정보 — CORRECTION 상태 판정 데이터
         "correction_requested_at": correction_requested_at,
         "correction_amended_at": correction_amended_at,
+        # v1.2 (지시 #21): 주관사·인수회사 목록 (JSON 문자열로 저장)
+        "underwriters_json": None,
     }
 
     if core is None:
@@ -459,6 +462,10 @@ def process_corp(
             demand_forecast_start=parsed.demand_forecast_start,
             demand_forecast_end=parsed.demand_forecast_end,
         )
+        # v1.2 (지시 #21): underwriters 를 JSON 문자열로
+        if parsed.underwriters:
+            import json as _json
+            row["underwriters_json"] = _json.dumps(parsed.underwriters, ensure_ascii=False)
         # 지시 #20: price_confirm_date 는 발행조건확정 공시 접수일로 fallback.
         # 명세: "확정공고일 = 이날 [발행조건확정] 공시로 기관 데이터 공개" → core 가 [발행조건확정] 이면 접수일 == 공고일.
         if row["price_confirm_date"] is None and is_final_release(core.get("report_nm", "")):

@@ -59,6 +59,19 @@ def _correction_from_row(row: dict) -> Optional[CorrectionInfo]:
     return CorrectionInfo(requested_at=requested, amended_at=row.get("correction_amended_at"))
 
 
+def _underwriters_from_row(row: dict) -> list[str]:
+    """v1.2 (지시 #21): underwriters_json 컬럼(JSON 문자열) → list[str]."""
+    raw = row.get("underwriters_json")
+    if not raw:
+        return []
+    try:
+        import json as _json
+        data = _json.loads(raw)
+        return [str(x) for x in data] if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
 def _detail_from_row(row: dict, shares: int) -> IpoDetail:
     cfg = get_scoring_config()
     ind = _indicators_from_row(row)
@@ -89,6 +102,7 @@ def _detail_from_row(row: dict, shares: int) -> IpoDetail:
         min_deposit=deposit,
         sources=_sources_from_row(row),
         checklist=checklist,
+        underwriters=_underwriters_from_row(row),   # v1.2 (지시 #21)
     )
 
 

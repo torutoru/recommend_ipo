@@ -145,6 +145,8 @@ class IpoDetail(IpoSummary):
     min_deposit: Optional[MinDeposit] = None
     sources: list[SourceDoc] = Field(default_factory=list)
     checklist: list[ChecklistItem] = Field(default_factory=list)   # v0.3 — 항상 6개
+    # v1.2 (지시 #21): 주관사·인수회사 이름(대표→공동→인수 순, 중복 제거). 상세 화면에만 노출.
+    underwriters: list[str] = Field(default_factory=list)
 
 
 class IpoList(BaseModel):

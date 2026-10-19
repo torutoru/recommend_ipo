@@ -277,12 +277,11 @@ def test_dtis_parse_offering_amount_prefers_explicit(dtis_xml_bytes):
 DAVIO_SECTION = FIXTURE_DIR / "davio_offering_section.xml"
 
 
-def test_davio_parse_rejects_tiny_offering_and_falls_back():
-    """다비오 공시(20261008000705) 핵심 섹션 fixture:
-    - 서술형 밴드 "공모희망가액인 12,300원 ~ 16,600원" → band 추출 OK (regex 완화)
+def test_davio_parse_rejects_tiny_offering_falls_back_null_before_final_price():
+    """다비오 공시(20261008000705) 핵심 섹션 fixture — 지시 #75aebc23 반영:
+    - 서술형 밴드 "공모희망가액인 12,300원 ~ 16,600원" → band 추출 OK
     - "모집 또는 매출주식의 수 기명식 보통주 1,000,000주" → total_offering_count 추출 OK
-    - 확정가 없음(PENDING 단계) → fallback = total × band_low = 1,230,000,000원 (123억)
-    - **핵심 회귀**: 결과값이 12,300(가격 오탐)이 아니라 fallback 산출값이어야 함.
+    - 확정가 없음(PENDING 단계) → offering_amount_krw 는 **null** (band_low 추정 제거)
     """
     xml_bytes = DAVIO_SECTION.read_bytes()
     p = parse(xml_bytes, rcept_no="20261008000705", corp_name="다비오",
@@ -290,12 +289,10 @@ def test_davio_parse_rejects_tiny_offering_and_falls_back():
     assert p.band_low == 12_300
     assert p.band_high == 16_600
     assert p.total_offering_count == 1_000_000
-
-    # 핵심: 공모 금액이 '12,300원 오탐' 이 아니라 fallback(123억)
-    assert p.offering_amount_krw != 12_300
-    assert p.offering_amount_krw == 1_000_000 * 12_300
-    # fallback 경고 포함 (명시 매치 거부 또는 확정가 전 보수 추정 중 하나)
-    assert any("타당성 기준" in w or "보수 추정" in w for w in p.warnings)
+    assert p.final_price is None
+    # 핵심: 공모 금액이 '12,300원 오탐'이 아니라 null (band_low 추정 제거, "최저가액 기준" 명시도 거부)
+    assert p.offering_amount_krw is None
+    assert any("확정가 전" in w or "band_low" in w or "null" in w for w in p.warnings)
 
 
 def test_offering_amount_rejects_tiny_value_when_total_and_band_present(dtis_xml_bytes):
@@ -488,3 +485,77 @@ def test_extract_demand_forecast_period_null_when_no_match():
     text = "<P>청약기간: 2026년 10월 20일 ~ 2026년 10월 21일</P>"
     s, e = extract_demand_forecast_period(text)
     assert s is None and e is None
+
+
+# ---------------- 지시 #21: 주관사·인수회사 추출 ----------------
+
+def test_extract_underwriters_basic():
+    from app.parser import extract_underwriters
+    text = "<P>대표주관회사인 삼성증권㈜과 발행회사가 협의하여 결정합니다.</P>"
+    assert extract_underwriters(text) == ["삼성증권"]
+
+
+def test_extract_underwriters_lead_plus_joint():
+    from app.parser import extract_underwriters
+    text = (
+        "<P>대표주관회사는 신한투자증권주식회사입니다.</P>"
+        "<P>공동주관회사 하나증권이 참여합니다.</P>"
+    )
+    assert extract_underwriters(text) == ["신한투자증권", "하나증권"]
+
+
+def test_extract_underwriters_dedup_and_order():
+    """대표 → 공동 → 인수 순, 중복 제거."""
+    from app.parser import extract_underwriters
+    text = (
+        "<P>대표주관회사인 대신증권</P>"
+        "<P>인수회사 대신증권</P>"      # 대표와 같은 이름 — 중복 제거
+        "<P>인수회사인 하나증권</P>"
+    )
+    assert extract_underwriters(text) == ["대신증권", "하나증권"]
+
+
+def test_extract_underwriters_empty_when_no_match():
+    from app.parser import extract_underwriters
+    assert extract_underwriters("<P>본 공모는 2026년 10월에 진행됩니다.</P>") == []
+
+
+# ---------------- 지시 #75aebc23: 확정가 전 공모 금액 null ----------------
+
+def test_offering_amount_null_when_no_final_price():
+    """final_price 없음(확정가 전) → offering_amount_krw 는 반드시 null, band_low 추정 제거."""
+    xml = (
+        '<DOC>'
+        '<P>공모희망가액 범위(10,000원 ~ 12,000원)</P>'
+        '<P>본 공시 접수일 2026-10-12</P>'
+        '<P>청약기간: 2026년 10월 20일 ~ 2026년 10월 21일</P>'
+        # 총수량 명시 (fallback band_low×total 유혹)
+        '<P>모집(매출)총수량 1,000,000주</P>'
+        '</DOC>'
+    ).encode("utf-8")
+    p = parse(xml, rcept_no="x", corp_name="t", rcept_dt="2026-10-12")
+    assert p.final_price is None
+    assert p.offering_amount_krw is None   # band_low × total 거부
+    assert any("band_low" in w or "확정가 전" in w or "null" in w for w in p.warnings)
+
+
+def test_offering_amount_explicit_rejected_without_final_price():
+    """확정가 전 원문 명시('최저가액 기준' 가능성) → explicit 이 있어도 null."""
+    xml = (
+        '<DOC>'
+        '<P>공모희망가액 범위(10,000원 ~ 12,000원)</P>'
+        '<P>본 공시 접수일 2026-10-12</P>'
+        '<P>청약기간: 2026년 10월 20일 ~ 2026년 10월 21일</P>'
+        '<P>모집(매출)총액(예정): 12,300,000,000원</P>'    # 최저가 기준 예정 총액
+        '</DOC>'
+    ).encode("utf-8")
+    p = parse(xml, rcept_no="x", corp_name="t", rcept_dt="2026-10-12")
+    assert p.final_price is None
+    assert p.offering_amount_krw is None
+
+
+def test_offering_amount_keeps_explicit_when_final_price_present(dtis_xml_bytes):
+    """final_price 있으면 원문 명시 그대로. (디티에스 fixture — 확정가 18,500 + 명시 총액)."""
+    p = parse(dtis_xml_bytes, rcept_no="20261012000308", corp_name="디티에스", rcept_dt="2026-10-12")
+    assert p.final_price is not None
+    assert p.offering_amount_krw is not None   # 명시 총액 그대로

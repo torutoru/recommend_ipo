@@ -50,6 +50,9 @@ class ParsedIpo:
     demand_forecast_start: Optional[str] = None    # 수요예측 시작일
     demand_forecast_end: Optional[str] = None      # 수요예측 종료일
 
+    # v1.2 (지시 #21): 주관사·인수회사 이름 목록 (대표→공동→인수 순, 중복 제거). 수량·금액 없음.
+    underwriters: list[str] = field(default_factory=list)
+
     warnings: list[str] = field(default_factory=list)
 
 
@@ -451,6 +454,49 @@ def extract_price_confirm_date(xml: str) -> Optional[str]:
     return f"{int(m.group(1)):04d}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
 
 
+# ---------- 주관사·인수회사 (지시 #21 / v1.2) ----------
+
+# 공식 API estkRs 는 IPO 증권신고서를 반환하지 않음(실측 0건) → 원본 XML 서술 매치로.
+# 매치 범위:
+#   - "대표주관회사(인|는|로|가)? ○○증권(주식회사)?" / "...인 ㈜○○"
+#   - "공동주관회사" / "공동대표주관회사" / "인수회사" (수량·금액은 쓰지 않음 — pm 지시)
+_RE_UW_LEAD = re.compile(
+    r"대표\s*주관\s*회사(?:인|는|로|가)?\s*(?:(?:㈜|주식회사)\s*)?([가-힣A-Za-z]{1,15}(?:증권))"
+)
+_RE_UW_JOINT = re.compile(
+    r"(?:공동\s*대표\s*주관\s*회사|공동\s*주관\s*회사)(?:인|는|로|가)?\s*(?:(?:㈜|주식회사)\s*)?([가-힣A-Za-z]{1,15}(?:증권))"
+)
+_RE_UW_SUB = re.compile(
+    r"인수\s*회사(?:인|는|로|가)?\s*(?:(?:㈜|주식회사)\s*)?([가-힣A-Za-z]{1,15}(?:증권))"
+)
+
+
+def _normalize_underwriter(name: str) -> str:
+    name = re.sub(r"\s+", "", name).strip()
+    # 꼬리 "주식회사" / "㈜" 제거
+    name = re.sub(r"(?:주식회사|㈜)$", "", name)
+    return name
+
+
+def extract_underwriters(xml: str) -> list[str]:
+    """지시 #21 (v1.2): 주관사·인수회사 이름 목록. 대표 → 공동 → 인수 순, 중복 제거.
+
+    estkRs API 가 IPO 증권신고서를 반환하지 않아 원문 서술 매치로 추출(실측 결정).
+    수량·금액은 쓰지 않는다(크리에이츠 udtcnt 1,400,000,000 이상값 사례).
+    """
+    text = _strip_tags(xml)
+    leads = [_normalize_underwriter(m.group(1)) for m in _RE_UW_LEAD.finditer(text)]
+    joints = [_normalize_underwriter(m.group(1)) for m in _RE_UW_JOINT.finditer(text)]
+    subs = [_normalize_underwriter(m.group(1)) for m in _RE_UW_SUB.finditer(text)]
+    seen: set[str] = set()
+    out: list[str] = []
+    for name in leads + joints + subs:
+        if name and name not in seen:
+            seen.add(name)
+            out.append(name)
+    return out
+
+
 # ---------- 수요예측 기간 (지시 #20 / v1.1) ----------
 
 # "수요예측 기간: 2026년 10월 15일 ~ 2026년 10월 16일" / "수요예측기간 ..." / "기관투자자 수요예측 기간 ..."
@@ -645,19 +691,26 @@ def parse(
                 f"— 명시값 거부, fallback 산출로 전환"
             )
             explicit_amount = None
-    if explicit_amount is not None:
+    # 지시 #75aebc23: 확정가 전에는 **null** 고정.
+    # - final_price 가 없으면 원문 명시값(explicit_amount)도 "최저가액 기준(예정)" 일 가능성 → null
+    # - fallback total_offering_count × band_low 도 제거 (가산 기준이 밴드 하단 기반이 되는 오해 방지)
+    # - final_price 가 있으면 원문 명시 우선, 없으면 total × final 로 산출
+    if out.final_price is None:
+        out.offering_amount_krw = None
+        if explicit_amount is not None:
+            out.warnings.append(
+                f"공모 금액 원문 매치값 {explicit_amount:,}원 이 '최저가액 기준(예정)' 가능성 — "
+                "확정가 전이라 null 유지"
+            )
+        else:
+            out.warnings.append("공모 금액: 확정가 전이라 null (band_low 추정 제거)")
+    elif explicit_amount is not None:
         out.offering_amount_krw = explicit_amount
-    elif out.total_offering_count is not None and out.final_price is not None:
+    elif out.total_offering_count is not None:
         out.offering_amount_krw = out.total_offering_count * out.final_price
-    elif out.total_offering_count is not None and out.band_low is not None:
-        # 확정가 전 단계라도 밴드 하단으로 하한 추정 — pm 가산 기준(≥1000억) 판단은 **하한** 쪽이 보수적
-        out.offering_amount_krw = out.total_offering_count * out.band_low
-        out.warnings.append(
-            "공모 금액: 확정가 전이라 band_low × total_offering_count 로 보수 추정 (가산 판단은 하한 기준)"
-        )
     else:
         out.offering_amount_krw = None
-        out.warnings.append("공모 금액(모집 총액)을 산출하지 못함 — 원문 명시도, 총수량·확정가/밴드도 없음")
+        out.warnings.append("공모 금액: 확정가 있으나 원문·총수량 모두 없음 — null")
 
     # 유통가능 비율 (v0.5 — 서술형 추출)
     out.tradable_ratio = extract_tradable_ratio(xml)
@@ -680,6 +733,9 @@ def parse(
     ds, de = extract_demand_forecast_period(xml)
     out.demand_forecast_start = ds
     out.demand_forecast_end = de
+
+    # 지시 #21 / v1.2: 주관사·인수회사 이름
+    out.underwriters = extract_underwriters(xml)
 
     # 메타 보조 로그
     if rcept_no:
