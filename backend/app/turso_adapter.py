@@ -57,6 +57,12 @@ def _mask(s: str) -> str:
 # ---------- 값 ↔ Turso typed value ----------
 
 def _to_arg(v: Any) -> dict:
+    """Python 값 → Hrana typed value (지시 #23 확정 포맷):
+    - integer: value 는 **문자열** (JS 안전 정수 범위 때문)
+    - float:   value 는 **JSON 숫자** (지시 #23 수정 — 문자열이면 Turso 가 "expected f64" 400)
+    - text:    value 는 문자열
+    - null / blob: 전용 타입
+    """
     if v is None:
         return {"type": "null"}
     if isinstance(v, bool):
@@ -65,7 +71,7 @@ def _to_arg(v: Any) -> dict:
     if isinstance(v, int):
         return {"type": "integer", "value": str(v)}
     if isinstance(v, float):
-        return {"type": "float", "value": str(v)}
+        return {"type": "float", "value": v}
     if isinstance(v, (bytes, bytearray)):
         return {"type": "blob", "base64": base64.b64encode(bytes(v)).decode("ascii")}
     # str 또는 그 외 → text
@@ -73,7 +79,10 @@ def _to_arg(v: Any) -> dict:
 
 
 def _from_value(v: dict) -> Any:
-    """Turso 응답의 typed value → Python 원시값."""
+    """Turso 응답의 typed value → Python 원시값.
+
+    integer 는 문자열로, float 는 숫자(또는 문자열 호환) 로 올 수 있음을 둘 다 수용.
+    """
     t = v.get("type")
     if t == "null":
         return None
@@ -81,7 +90,7 @@ def _from_value(v: dict) -> Any:
     if t == "integer":
         return int(val)
     if t == "float":
-        return float(val)
+        return float(val)   # JSON 숫자 또는 문자열 둘 다 float() 수용
     if t == "text":
         return val
     if t == "blob":

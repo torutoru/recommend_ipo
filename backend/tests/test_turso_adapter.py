@@ -47,11 +47,25 @@ def test_split_sql_handles_multiple():
 
 
 def test_to_arg_type_mapping():
+    """지시 #23: Turso 규약 고정.
+    - integer: value 문자열 (JS 안전 정수 때문)
+    - float:   value **JSON 숫자** (문자열이면 Turso 가 "expected f64" 400)
+    - text:    value 문자열
+    """
     assert _to_arg(None) == {"type": "null"}
     assert _to_arg(42) == {"type": "integer", "value": "42"}
-    assert _to_arg(1.5) == {"type": "float", "value": "1.5"}
+    assert _to_arg(1.5) == {"type": "float", "value": 1.5}       # ← JSON 숫자
+    assert _to_arg(0.0) == {"type": "float", "value": 0.0}
     assert _to_arg("hi") == {"type": "text", "value": "hi"}
     assert _to_arg(True) == {"type": "integer", "value": "1"}
+
+
+def test_float_value_is_json_number_not_string():
+    """회귀 — float 는 반드시 JSON number. isinstance str 이면 안 됨."""
+    arg = _to_arg(1041.02)
+    assert arg["type"] == "float"
+    assert isinstance(arg["value"], float)
+    assert not isinstance(arg["value"], str)
 
 
 def test_from_value_type_mapping():
@@ -96,6 +110,14 @@ class _FakeTursoBackend:
 
     def handle(self, request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content.decode("utf-8"))
+        # 지시 #23 재발 방지: 실 Turso 처럼 **엄격 타입 검증** — 어긋나면 400
+        for req in body["requests"]:
+            if req["type"] != "execute":
+                continue
+            for a in req["stmt"].get("args", []):
+                err = _strict_validate_arg(a)
+                if err:
+                    return httpx.Response(400, json={"error": err})
         results: list[dict] = []
         for req in body["requests"]:
             if req["type"] == "close":
@@ -251,6 +273,27 @@ class _FakeTursoBackend:
         return {"type": "text", "value": str(v)}
 
 
+def _strict_validate_arg(a: dict):
+    """실 Turso 가 반환하는 파싱 에러를 흉내 — 타입 틀리면 메시지 반환, OK 면 None.
+
+    이 fake 서버는 **실 Turso 처럼 엄격** 하므로:
+    - float value 가 **문자열** 이면 'expected f64' 400 (지시 #23 재발 방지)
+    - integer value 가 문자열 아니면 400
+    """
+    t = a.get("type")
+    v = a.get("value")
+    if t == "float":
+        if not isinstance(v, (int, float)) or isinstance(v, bool):
+            return f'invalid type: string "{v}", expected f64'
+    elif t == "integer":
+        if not isinstance(v, str):
+            return f"invalid type: {type(v).__name__}, expected string for integer"
+    elif t == "text":
+        if not isinstance(v, str):
+            return f"invalid type: {type(v).__name__}, expected string for text"
+    return None
+
+
 @pytest.fixture
 def fake_turso(monkeypatch):
     """httpx.Client 를 MockTransport 로 교체 + Settings 에 fake URL/토큰 주입."""
@@ -372,6 +415,33 @@ def test_store_connect_no_fallback_on_turso_failure(monkeypatch):
     with pytest.raises(TursoConnectError):
         with store.connect() as conn:
             conn.execute("SELECT 1")
+
+
+def test_float_as_string_would_trigger_400(fake_turso):
+    """회귀 — 만약 _to_arg 가 다시 float 를 문자열로 돌리면 fake 서버가 즉시 400 을 돌려줘야 함.
+
+    _to_arg 를 임시로 float→string 로 돌린 fake 모듈 쓰기 호출. 실제 운영 Turso 와 동일하게
+    "expected f64" 400 이 나와 TursoConnectError 로 전파 → 운영 재파싱 전부 실패 원인 재현.
+    """
+    from app.turso_adapter import connect_turso, _to_arg
+    import app.turso_adapter as adapter
+    original = adapter._to_arg
+
+    def buggy_to_arg(v):
+        if isinstance(v, float):
+            return {"type": "float", "value": str(v)}   # 지시 #23 전 버그
+        return original(v)
+
+    adapter._to_arg = buggy_to_arg
+    try:
+        with pytest.raises(TursoConnectError) as exc:
+            with connect_turso() as c:
+                c.execute("INSERT INTO ipos (corp_code, competition_rate) VALUES (?, ?)",
+                          ("x", 1041.02))
+        assert "expected f64" in str(exc.value)
+        assert "400" in str(exc.value)
+    finally:
+        adapter._to_arg = original
 
 
 def test_400_body_included_in_error(monkeypatch):
