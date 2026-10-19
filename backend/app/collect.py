@@ -51,7 +51,8 @@ DART_URL = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo="
 #   v3 — 지시 #19 (INCOMPLETE 상태 도입, "미공시 0점" 폐지)
 #   v4 — 지시 #24 (재파싱 시 종목 전체 이력 조회, core=None 보호, sources 보존)
 #   v5 — 지시 #25 (실적보고서 상장일(매매개시일)·상장구분 파싱 + ISSUANCE_REPORT 보강)
-PARSER_VERSION = "v5"
+#   v6 — 지시 #26 (삼성증권 형식 — 확약 섹션 "의무보유 확약 신청내역" 수용 + 유통 서술형 역순)
+PARSER_VERSION = "v6"
 
 
 # ---------- 분류 ----------

@@ -221,9 +221,12 @@ def extract_subscription_dates(xml: str) -> tuple[Optional[str], Optional[str]]:
 # 각 TR 안의 셀은 (건수, 수량, 신청가격) × N기관 → 큰 수(>=1,000,000)만 수량으로 간주해 합산.
 
 # 섹션 끝: (라)/(마)/(바) 또는 "USERMARK=\"0X" + 색상 코드 SPAN(다른 섹션 시작). 티앤이코리아는 "B 0X1814FF" 로 다름.
-# → USERMARK 패턴을 색상 코드 전반으로 완화. 더 안전하게 다음 "(…)" 소제목 패턴도 추가.
+# 지시 #26: 발행사·주관사마다 섹션 이름이 다름 — 공통 접두 "(다) 의무보유" + 임의 꼬리 + "내역".
+#   디티에스(대신): "(다) 의무보유확약기간별 수요예측 참여내역"
+#   티앤이코리아(신한): "(다) 의무보유확약기간별 수요예측 참여내역"
+#   크리에이츠(삼성): "(다) 의무보유 확약 신청내역"
 _RE_LOCKUP_SECTION = re.compile(
-    r"\(다\)\s*의무보유확약기간별\s*수요예측\s*참여내역(.*?)"
+    r"\(다\)\s*의무보유[^(]{0,40}?내역(.*?)"
     r"(?=\(라\)|\(마\)|\(바\)|<SPAN\s+USERMARK=\"[^\"]*0X[0-9A-Fa-f]+\"[^>]*>\s*\([가-힣]\))",
     re.DOTALL,
 )
@@ -283,6 +286,14 @@ _RE_TRADABLE_RATIO_NARRATIVE = re.compile(
     r"(?:약\s*)?([\d.]+)\s*%\s*에\s*해당하는\s*[\d,]+\s*주[^<]{0,40}유통가능\s*물량"
 )
 
+# 지시 #26: 삼성증권 형식(크리에이츠) — 순서 반전 "N주는 상장 직후 ... 유통가능 ... %"
+# "상기의 의무보유 수량을 제외한 주식수 5,176,832주는 상장 직후 시장에서 유통가능한 물량이며,
+#  상장예정주식수 기준으로 39.47%에 해당합니다"
+# 핵심 신호: "상장 직후" 근처 + "유통가능" + 그 뒤 N%. 상장 후 N개월 뒤 유통가능 섹션은 "상장 직후" 가 없음.
+_RE_TRADABLE_RATIO_NARRATIVE_INVERTED = re.compile(
+    r"상장\s*직후[^%<]{0,120}?유통가능[^%<]{0,120}?([\d.]+)\s*%"
+)
+
 # fallback: 테이블 "유통가능물량(A-B)" 라벨 셀 뒤 300자 이내에서 "N.NN%" 매치 (첫 매치).
 # 중간에 한글 라벨(최대주주/벤처금융 등)이 끼면 다른 섹션이므로 거부.
 _RE_TRADABLE_RATIO_TABLE = re.compile(
@@ -291,11 +302,14 @@ _RE_TRADABLE_RATIO_TABLE = re.compile(
 
 
 def extract_tradable_ratio(xml: str) -> Optional[float]:
-    """상장일 유통가능 비율(%). 서술형 → 테이블 fallback 순."""
+    """상장일 유통가능 비율(%). 서술형(2종) → 테이블 fallback 순."""
     text = _strip_tags(xml)
     m = _RE_TRADABLE_RATIO_NARRATIVE.search(text)
     if m:
         return _to_float(m.group(1))
+    m_inv = _RE_TRADABLE_RATIO_NARRATIVE_INVERTED.search(text)
+    if m_inv:
+        return _to_float(m_inv.group(1))
     m2 = _RE_TRADABLE_RATIO_TABLE.search(text)
     if m2:
         return _to_float(m2.group(1))

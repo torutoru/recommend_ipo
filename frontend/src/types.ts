@@ -52,9 +52,13 @@ export interface ChecklistItem {
 export interface Verdict {
   status: Status
   grade: Grade | null
-  // PASS·REJECT 일 때 값. PENDING·CORRECTION 은 null. 불변식: verdict.score === scores.total.
+  // PASS·REJECT 일 때 값. PENDING·CORRECTION 은 null. PASS 와 score_range 가 있는 경우 score = min.
   score: number | null
   correction: Correction | null  // v0.8 — status === 'CORRECTION' 이면 값, 그 외 null
+  // v1.4: 미확인 지표가 있어도 결과가 바뀌지 않는 경우 범위로 확정.
+  // PASS 확정 (min ≥ 50) · REJECT 확정 (max < 50) 둘 중 하나.
+  // null 이거나 필드가 없으면 기존 단일 점수 표시로 degraded.
+  score_range: { min: number; max: number } | null
 }
 
 export interface IpoSummary {

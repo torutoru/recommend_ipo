@@ -150,16 +150,35 @@ export function DetailPage() {
           <div><dt>확정 공모가</dt><dd>{fmtOrNull(detail.final_price, fmtKrw)}</dd></div>
           <div><dt>총점 · 등급</dt>
             <dd>
-              {detail.verdict.status === 'INCOMPLETE' ? (
-                <strong className="verdict-incomplete">판정 보류 · 데이터 확인 필요</strong>
-              ) : (
-                <>
-                  {totalLine}
-                  {detail.verdict.grade && (
-                    <> · <strong>{detail.verdict.grade}</strong></>
-                  )}
-                </>
-              )}
+              {(() => {
+                if (detail.verdict.status === 'INCOMPLETE') {
+                  return <strong className="verdict-incomplete">판정 보류 · 데이터 확인 필요</strong>
+                }
+                const range = detail.verdict.score_range
+                // v1.4 — PASS: "min~max점 · 최소 등급". REJECT: "최대 max점".
+                if (range && detail.verdict.status === 'PASS') {
+                  return (
+                    <>
+                      <strong>{range.min}~{range.max}점</strong>
+                      {detail.verdict.grade && (
+                        <> · <strong>최소 {detail.verdict.grade}</strong></>
+                      )}
+                    </>
+                  )
+                }
+                if (range && detail.verdict.status === 'REJECT') {
+                  return <><strong>최대 {range.max}점</strong></>
+                }
+                // 기존 단일 점수 표시 (score_range null 또는 그 외 상태).
+                return (
+                  <>
+                    {totalLine}
+                    {detail.verdict.grade && (
+                      <> · <strong>{detail.verdict.grade}</strong></>
+                    )}
+                  </>
+                )
+              })()}
             </dd>
           </div>
           <div>
@@ -217,10 +236,13 @@ export function DetailPage() {
         {rows.map((r, i) => {
           // v1.0: 미공시 0점 처리 폐지. 지표 null + 점수 null 인 INCOMPLETE 종목에서
           // 해당 지표 셀에 "확인 필요" 라벨을 붙여 판정 보류 사유를 바로 보이게.
+          // v1.4: score_range 로 PASS/REJECT 확정된 종목도 미확인 지표에 "확인 필요".
           const needsInput =
-            detail.verdict.status === 'INCOMPLETE' &&
             r.indicatorMissing &&
-            r.scoreValue === null
+            (
+              (detail.verdict.status === 'INCOMPLETE' && r.scoreValue === null) ||
+              (detail.verdict.score_range != null)
+            )
           return (
             <div className="indicator-card" key={i}>
               <div className="indicator-label">{r.label}</div>

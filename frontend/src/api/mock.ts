@@ -78,6 +78,8 @@ const PASS_B_DEC_ID = '00888888'
 const PASS_A_LARGECAP_ID = '00999999'
 const CORRECTION_UNAMENDED_ID = '01020201' // v0.8: 정정요구 미제출
 const CORRECTION_AMENDED_ID = '01020202'   // v0.8: 정정요구 → 정정신고서 제출됨
+const RANGE_PASS_ID = '01030301'           // v1.4: 범위 확정 PASS (최소 B)
+const RANGE_REJECT_ID = '01030302'         // v1.4: 범위 확정 REJECT (최대 M점)
 
 // --- summaries ------------------------------------------------------------
 
@@ -92,7 +94,7 @@ const summaries: IpoSummary[] = [
     band_low: 36000,
     band_high: 42000,
     final_price: 45000,
-    verdict: { status: 'PASS', grade: 'S', score: 100, correction: null },
+    verdict: { status: 'PASS', grade: 'S', score: 100, correction: null, score_range: null },
     price_confirm_date: '2026-10-24',
     demand_forecast_start: '2026-10-22',
     demand_forecast_end: '2026-10-23',
@@ -109,7 +111,7 @@ const summaries: IpoSummary[] = [
     band_high: 23000,
     final_price: 23000,
     // v1.0: lockup null → INCOMPLETE (0점 처리 폐지)
-    verdict: { status: 'INCOMPLETE', grade: null, score: null, correction: null },
+    verdict: { status: 'INCOMPLETE', grade: null, score: null, correction: null, score_range: null },
     price_confirm_date: '2026-10-26',
     demand_forecast_start: '2026-10-23',
     demand_forecast_end: '2026-10-24',
@@ -125,7 +127,7 @@ const summaries: IpoSummary[] = [
     band_low: 11000,
     band_high: 13000,
     final_price: 11800,
-    verdict: { status: 'PASS', grade: 'B', score: 52, correction: null },
+    verdict: { status: 'PASS', grade: 'B', score: 52, correction: null, score_range: null },
     price_confirm_date: '2026-10-26',
     demand_forecast_start: '2026-10-23',
     demand_forecast_end: '2026-10-24',
@@ -141,7 +143,7 @@ const summaries: IpoSummary[] = [
     band_low: 15000,
     band_high: 18000,
     final_price: 14000,
-    verdict: { status: 'REJECT', grade: null, score: 15, correction: null },
+    verdict: { status: 'REJECT', grade: null, score: 15, correction: null, score_range: null },
     price_confirm_date: '2026-10-28',
     demand_forecast_start: '2026-10-24',
     demand_forecast_end: '2026-10-25',
@@ -157,7 +159,7 @@ const summaries: IpoSummary[] = [
     band_low: 24000,
     band_high: 28000,
     final_price: null,
-    verdict: { status: 'PENDING', grade: null, score: null, correction: null },
+    verdict: { status: 'PENDING', grade: null, score: null, correction: null, score_range: null },
     price_confirm_date: '2026-11-03',
     demand_forecast_start: '2026-10-30',
     demand_forecast_end: '2026-10-31',
@@ -173,7 +175,7 @@ const summaries: IpoSummary[] = [
     band_low: 32000,
     band_high: 38000,
     final_price: 38000,
-    verdict: { status: 'PASS', grade: 'A', score: 70, correction: null },
+    verdict: { status: 'PASS', grade: 'A', score: 70, correction: null, score_range: null },
     price_confirm_date: '2026-11-05',
     demand_forecast_start: '2026-11-03',
     demand_forecast_end: '2026-11-04',
@@ -194,6 +196,7 @@ const summaries: IpoSummary[] = [
       grade: null,
       score: null,
       correction: { requested_at: '2026-11-10', amended_at: null },
+      score_range: null,
     },
     price_confirm_date: '2026-11-13',
     demand_forecast_start: '2026-11-10',
@@ -210,7 +213,7 @@ const summaries: IpoSummary[] = [
     band_low: 16000,
     band_high: 20000,
     final_price: null,
-    verdict: { status: 'PENDING', grade: null, score: null, correction: null },
+    verdict: { status: 'PENDING', grade: null, score: null, correction: null, score_range: null },
     price_confirm_date: '2026-11-16',
     demand_forecast_start: '2026-11-12',
     demand_forecast_end: '2026-11-13',
@@ -232,6 +235,7 @@ const summaries: IpoSummary[] = [
       score: null,
       // 정정신고서는 제출됐지만 발행조건확정 전이므로 여전히 CORRECTION 유지.
       correction: { requested_at: '2026-11-15', amended_at: '2026-11-18' },
+      score_range: null,
     },
     price_confirm_date: '2026-11-19',
     demand_forecast_start: '2026-11-16',
@@ -248,7 +252,7 @@ const summaries: IpoSummary[] = [
     band_low: 60000,
     band_high: 70000,
     final_price: 70000,
-    verdict: { status: 'PASS', grade: 'A', score: 77, correction: null },
+    verdict: { status: 'PASS', grade: 'A', score: 77, correction: null, score_range: null },
     price_confirm_date: '2026-11-20',
     demand_forecast_start: '2026-11-18',
     demand_forecast_end: '2026-11-19',
@@ -264,11 +268,59 @@ const summaries: IpoSummary[] = [
     band_low: 9000,
     band_high: 11000,
     final_price: 10500,
-    verdict: { status: 'PASS', grade: 'B', score: 55, correction: null },
+    verdict: { status: 'PASS', grade: 'B', score: 55, correction: null, score_range: null },
     price_confirm_date: '2026-12-04',
     demand_forecast_start: '2026-12-02',
     demand_forecast_end: '2026-12-03',
     updated_at: '2026-12-05T15:20:00+09:00',
+  },
+  {
+    id: RANGE_PASS_ID,
+    corp_name: '데이터팰리스',
+    market: 'KOSPI',
+    subscription_start: '2026-11-27',
+    subscription_end: '2026-11-28',
+    listing_date: null,
+    band_low: 30000,
+    band_high: 35000,
+    final_price: 36000,
+    // v1.4: lockup·flow 미확인이지만 min=60 이상 → PASS 확정 (최소 B, 최대 S).
+    // 계약 v1.4: score·scores.total·미확인 지표 scores 는 모두 null, score_range 만 값.
+    verdict: {
+      status: 'PASS',
+      grade: 'B',          // min 기준 등급 (화면 "최소 B" 표기에만 사용)
+      score: null,
+      correction: null,
+      score_range: { min: 60, max: 100 },
+    },
+    price_confirm_date: '2026-11-25',
+    demand_forecast_start: '2026-11-23',
+    demand_forecast_end: '2026-11-24',
+    updated_at: '2026-11-25T18:00:00+09:00',
+  },
+  {
+    id: RANGE_REJECT_ID,
+    corp_name: '레드박스',
+    market: null,
+    subscription_start: '2026-12-15',
+    subscription_end: '2026-12-16',
+    listing_date: null,
+    band_low: 7000,
+    band_high: 9000,
+    final_price: 7000,
+    // v1.4: lockup·flow 미확인이지만 max=40 < 50 → REJECT 확정.
+    // 계약 v1.4: score·scores.total·미확인 지표 scores 는 모두 null, score_range 만 값.
+    verdict: {
+      status: 'REJECT',
+      grade: null,
+      score: null,
+      correction: null,
+      score_range: { min: 0, max: 40 },
+    },
+    price_confirm_date: '2026-12-13',
+    demand_forecast_start: '2026-12-11',
+    demand_forecast_end: '2026-12-12',
+    updated_at: '2026-12-13T17:40:00+09:00',
   },
 ]
 
@@ -588,6 +640,72 @@ const seed: Record<string, DetailSeed> = {
       { doc_type: 'REGISTRATION_AMENDED', rcept_no: '20261205000888', rcept_dt: '2026-12-05', url: dartUrl('20261205000888') },
     ],
     underwriters: ['IBK투자증권'],
+  },
+  [RANGE_PASS_ID]: {
+    ...summaries.find(s => s.id === RANGE_PASS_ID)!,
+    indicators: {
+      competition_rate: 1820.0,
+      competition_rate_type: 'simple',
+      demand_amount_krw: 5_200_000_000_000,
+      price_position: 'ABOVE_BAND',
+      lockup_ratio: null,                 // 확인 필요
+      lockup_ratio_basis: null,
+      tradable_ratio: 20.0,
+      old_share_ratio: null,              // 확인 필요
+      new_share_count: null,
+      old_share_count: null,
+      total_offering_count: 1_200_000,
+      offering_amount_krw: 42_000_000_000,
+      report_rcept_no: '20261125000301',
+    },
+    // v1.4: 확정된 지표만 값, 미확인 지표·total 은 null (score_range 가 담당).
+    scores: { comp: 35, price: 25, lockup: null, flow: null, total: null },
+    reasons: [
+      '기관 경쟁률 1,820:1 (≥ 1,500) — 35점 확정.',
+      '확정 공모가 36,000원 (밴드 상단 35,000원 초과) — 25점 확정.',
+      '확약 비율 · 구주매출 비율 **확인 필요** — 범위: 최소 0점 ~ 최대 40점.',
+      '총점 범위 60 ~ 100점이지만 **최저값도 50점 이상이므로 PASS 확정** (최소 B · 최대 S).',
+    ],
+    reject_reasons: [],
+    sources: [
+      { doc_type: 'PROSPECTUS', rcept_no: '20261115000301', rcept_dt: '2026-11-15', url: dartUrl('20261115000301') },
+      { doc_type: 'REGISTRATION_AMENDED', rcept_no: '20261125000301', rcept_dt: '2026-11-25', url: dartUrl('20261125000301') },
+    ],
+    underwriters: ['한양증권'],
+  },
+  [RANGE_REJECT_ID]: {
+    ...summaries.find(s => s.id === RANGE_REJECT_ID)!,
+    indicators: {
+      competition_rate: 450.0,
+      competition_rate_type: 'weighted',
+      demand_amount_krw: 180_000_000_000,
+      price_position: 'BELOW_BAND',
+      lockup_ratio: null,                 // 확인 필요
+      lockup_ratio_basis: null,
+      tradable_ratio: null,               // 확인 필요
+      old_share_ratio: null,
+      new_share_count: null,
+      old_share_count: null,
+      total_offering_count: 400_000,
+      offering_amount_krw: 2_800_000_000,
+      report_rcept_no: '20261213000302',
+    },
+    // v1.4: 확정된 지표만 값, 미확인 지표·total 은 null.
+    scores: { comp: 0, price: 0, lockup: null, flow: null, total: null },
+    reasons: [
+      '기관 경쟁률 450:1 (< 500) — 0점 확정.',
+      '확정 공모가 7,000원 < 밴드 하단 — 0점 확정.',
+      '확약·유통 **확인 필요** — 범위: 최대 각각 20점.',
+      '총점 범위 0 ~ 40점으로 **최대값도 50점 미만 → REJECT 확정** (청약 비추천).',
+    ],
+    reject_reasons: [
+      '총점 범위 상한 40점이 PASS 기준(50점) 미만.',
+    ],
+    sources: [
+      { doc_type: 'PROSPECTUS', rcept_no: '20261203000302', rcept_dt: '2026-12-03', url: dartUrl('20261203000302') },
+      { doc_type: 'REGISTRATION_AMENDED', rcept_no: '20261213000302', rcept_dt: '2026-12-13', url: dartUrl('20261213000302') },
+    ],
+    underwriters: ['DB증권'],
   },
 }
 

@@ -402,3 +402,41 @@ def test_issuance_report_sample_fixture_parses_both_fields():
     text = xml_bytes.decode("utf-8")
     assert extract_listing_date(text) == "2026-10-22"
     assert extract_market(text) == "KOSDAQ"
+
+
+# ---------------- 지시 #26: 삼성증권 형식(크리에이츠) 확약/유통 ----------------
+
+def test_creatz_lockup_section_label_variant():
+    """크리에이츠 (다) 섹션명 "의무보유 확약 신청내역" 수용."""
+    xml = (FIXTURE_DIR / "creatz_lockup_tradable_section.xml").read_text(encoding="utf-8")
+    ratio, basis = extract_lockup(xml)
+    assert basis == "applied"
+    assert ratio == 0.00    # 실질 미확약 (15일 1건 5,000주만)
+
+
+def test_creatz_tradable_narrative_inverted_order():
+    """크리에이츠 서술형 역순 — '상장 직후 ... 유통가능 ... 상장예정주식수 기준으로 39.47%' 매치."""
+    text = (
+        "<P>상기의 의무보유 수량을 제외한 주식수 5,176,832주는 상장 직후 시장에서 "
+        "유통가능한 물량이며, 상past예정주식수 기준으로 39.47%에 해당합니다.</P>"
+    )
+    # strip_tags 가 태그 제거하므로 그 상태의 매치만 확인
+    assert extract_tradable_ratio(text) == 39.47
+
+
+def test_creatz_full_fixture_lockup_and_tradable():
+    """크리에이츠 fixture(필요 섹션만) → lockup 0.00, tradable 39.47."""
+    xml = (FIXTURE_DIR / "creatz_lockup_tradable_section.xml").read_text(encoding="utf-8")
+    ratio, basis = extract_lockup(xml)
+    assert ratio == 0.00
+    assert basis == "applied"
+    assert extract_tradable_ratio(xml) == 39.47
+
+
+def test_tradable_narrative_inverted_requires_sang_jang_jik_hu():
+    """유통가능 역순 regex 는 '상장 직후' 가 있어야 매치 — 상장 후 N개월 뒤 테이블은 거부."""
+    # "상장 직후" 없이 "상장 후 2개월 뒤 유통가능 ... 50.00%" 는 매치 안 돼야 함
+    text = "<P>상장 후 2개월 뒤 유통가능 물량은 상장예정주식수 기준 50.00% 입니다</P>"
+    # fallback(table regex 등) 가 매치할 수 있으므로 narrative_inverted 단독 확인은 regex 로
+    from app.parser import _RE_TRADABLE_RATIO_NARRATIVE_INVERTED
+    assert _RE_TRADABLE_RATIO_NARRATIVE_INVERTED.search(text) is None
