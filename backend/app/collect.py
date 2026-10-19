@@ -26,7 +26,7 @@ from typing import Optional
 import httpx
 
 from .config import BACKEND_DIR, get_settings
-from .dart_client import download_document_zip, list_disclosures
+from . import dart_client  # 테스트 격리 위해 모듈 참조 (`dart_client.download_document_zip` 로 호출)
 from .parser import parse
 from .store import (
     connect,
@@ -108,7 +108,7 @@ def fetch_all_c001(days: int) -> list[dict]:
     all_items: list[dict] = []
     page_no = 1
     while True:
-        resp = list_disclosures(
+        resp = dart_client.list_disclosures(
             bgn_de=bgn.strftime(fmt),
             end_de=end.strftime(fmt),
             pblntf_detail_ty="C001",
@@ -139,7 +139,7 @@ def get_document_zip_cached(rcept_no: str) -> bytes:
     if p.exists():
         data = p.read_bytes()
     else:
-        data = download_document_zip(rcept_no=rcept_no)
+        data = dart_client.download_document_zip(rcept_no=rcept_no)
         p.write_bytes(data)
     if not data.startswith(ZIP_MAGIC):
         raise RuntimeError(f"파일 매직 불일치 — ZIP 아님(rcept_no={rcept_no})")
@@ -262,44 +262,81 @@ def process_corp(
         parsed_warnings.append("정본 공시(발행조건확정/증권신고서) 없음 — PENDING 유지")
     else:
         rcept_no = core["rcept_no"]
+        xml_bytes: Optional[bytes] = None
+        download_error: Optional[str] = None
         try:
             zip_bytes = get_document_zip_cached(rcept_no)
             xml_bytes = extract_single_xml(zip_bytes)
         except Exception as e:
-            parsed_warnings.append(f"원문 다운로드/압축해제 실패({rcept_no}): {type(e).__name__}: {e}")
-            xml_bytes = None
+            download_error = f"원문 다운로드/압축해제 실패({rcept_no}): {type(e).__name__}: {e}"
+            parsed_warnings.append(download_error)
 
-        if xml_bytes:
-            parsed = parse(
-                xml_bytes,
-                rcept_no=rcept_no,
-                corp_name=corp_name,
-                rcept_dt=_dash_date(core.get("rcept_dt", "")),
-            )
-            row.update(
-                market=parsed.market,
-                subscription_start=parsed.subscription_start,
-                subscription_end=parsed.subscription_end,
-                listing_date=parsed.listing_date,
-                band_low=parsed.band_low,
-                band_high=parsed.band_high,
-                final_price=parsed.final_price,
-                price_position=parsed.price_position,
-                competition_rate=parsed.competition_rate,
-                competition_rate_type=parsed.competition_rate_type,
-                demand_quantity=parsed.demand_quantity,
-                demand_amount_krw=parsed.demand_amount_krw,
-                lockup_ratio=parsed.lockup_ratio,
-                lockup_ratio_basis=parsed.lockup_ratio_basis,
-                tradable_ratio=parsed.tradable_ratio,
-                old_share_ratio=parsed.old_share_ratio,
-                new_share_count=parsed.new_share_count,
-                old_share_count=parsed.old_share_count,
-                total_offering_count=parsed.total_offering_count,
-                offering_amount_krw=parsed.offering_amount_krw,
-                report_rcept_no=rcept_no,
-            )
-            parsed_warnings.extend(parsed.warnings)
+        if xml_bytes is None:
+            # 지시 #22: 다운로드/압축해제 실패 → 기존 데이터 **덮어쓰지 않음**.
+            # upsert_ipo 호출 skip, parser_version 도 갱신 안 함 → 다음 수집에서 재시도.
+            # sources·warnings 는 참고용이므로 업데이트해 둠(기존 데이터와 충돌 없음).
+            with connect() as conn:
+                replace_sources(conn, corp_code, sources_payload)
+                replace_warnings(conn, corp_code, parsed_warnings)
+            return {
+                "corp_code": corp_code,
+                "corp_name": corp_name,
+                "status": "download_failed",
+                "reason": download_error or "unknown",
+                "has_core_release": True,
+            }
+
+        parsed = parse(
+            xml_bytes,
+            rcept_no=rcept_no,
+            corp_name=corp_name,
+            rcept_dt=_dash_date(core.get("rcept_dt", "")),
+        )
+        # 지시 #22: **핵심 지표(parse 결과)** 가 전부 null 이면 저장소를 덮지 않음.
+        # 핵심 = band_low · final_price · competition_rate · lockup_ratio · tradable_ratio 중 **하나라도** 추출됐으면 유효한 파싱.
+        core_signals = (
+            parsed.band_low, parsed.final_price, parsed.competition_rate,
+            parsed.lockup_ratio, parsed.tradable_ratio,
+            parsed.subscription_start,  # 신고서 1차에는 이것만 있어도 OK
+        )
+        if all(v is None for v in core_signals):
+            msg = f"파싱 결과 핵심 지표 전부 null({rcept_no}) — 저장 skip"
+            parsed_warnings.append(msg)
+            with connect() as conn:
+                replace_sources(conn, corp_code, sources_payload)
+                replace_warnings(conn, corp_code, parsed_warnings)
+            return {
+                "corp_code": corp_code,
+                "corp_name": corp_name,
+                "status": "parse_empty",
+                "reason": msg,
+                "has_core_release": True,
+            }
+
+        row.update(
+            market=parsed.market,
+            subscription_start=parsed.subscription_start,
+            subscription_end=parsed.subscription_end,
+            listing_date=parsed.listing_date,
+            band_low=parsed.band_low,
+            band_high=parsed.band_high,
+            final_price=parsed.final_price,
+            price_position=parsed.price_position,
+            competition_rate=parsed.competition_rate,
+            competition_rate_type=parsed.competition_rate_type,
+            demand_quantity=parsed.demand_quantity,
+            demand_amount_krw=parsed.demand_amount_krw,
+            lockup_ratio=parsed.lockup_ratio,
+            lockup_ratio_basis=parsed.lockup_ratio_basis,
+            tradable_ratio=parsed.tradable_ratio,
+            old_share_ratio=parsed.old_share_ratio,
+            new_share_count=parsed.new_share_count,
+            old_share_count=parsed.old_share_count,
+            total_offering_count=parsed.total_offering_count,
+            offering_amount_krw=parsed.offering_amount_krw,
+            report_rcept_no=rcept_no,
+        )
+        parsed_warnings.extend(parsed.warnings)
 
     # 저장
     with connect() as conn:

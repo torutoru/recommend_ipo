@@ -28,11 +28,14 @@ from app.main import create_app
 # ---------- 공통 fixture ----------
 
 @pytest.fixture(autouse=True)
-def _reset_collect_state():
+def _reset_collect_state(tmp_path, monkeypatch):
     """각 테스트 전에 collect_service 상태(IDLE) + Lock 리셋.
 
     sqlite_path 는 conftest 의 `_force_tmp_sqlite_path` 가 이미 tmp 로 돌려 둠.
+    CACHE_DIR 도 tmp 로 돌려 운영 캐시 영향 격리 (지시 #22 테스트 안정화).
     """
+    from app import collect as _collect
+    monkeypatch.setattr(_collect, "CACHE_DIR", tmp_path / "cache_default")
     store.init_db()
     collect_service._reset_for_tests()
     yield
@@ -121,7 +124,7 @@ def _mock_dart(monkeypatch, *, list_items: list[dict], zip_map: dict[str, bytes]
     monkeypatch.setattr(dart_client, "download_document_zip", fake_download)
 
 
-def _wait_done(client: TestClient, timeout: float = 5.0) -> dict:
+def _wait_done(client: TestClient, timeout: float = 15.0) -> dict:
     """RUNNING 이면 짧게 폴링. 완료되면 상태 dict 반환."""
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -277,6 +280,87 @@ def test_idle_status_before_any_run(client):
     r = client.get("/api/collect/status")
     assert r.status_code == 200
     assert r.json()["status"] == "IDLE"
+
+
+def test_download_failure_does_not_overwrite_existing(client, monkeypatch, tmp_path):
+    """지시 #22 핵심 — 다운로드 실패해도 기존 종목 데이터를 null 로 덮지 않음.
+
+    1회차: 정상 수집 → ipos 1건, 핵심 지표 set
+    2회차: ZIP 다운로드가 모두 실패 → "download_failed" 로 분류 → upsert·parser_version 갱신 skip
+    → 기존 competition_rate / price_position 가 **그대로 유지** 되어야 함
+    """
+    from app import collect as collect_mod, dart_client
+    # 캐시 디렉토리를 tmp 로 돌려 2회차에서 "캐시 없음" 상태 재현
+    monkeypatch.setattr(collect_mod, "CACHE_DIR", tmp_path / "cache")
+
+    items = [_disc("20261012000308", "[발행조건확정]증권신고서(지분증권)",
+                   "00534729", "디티에스")]
+
+    # 1회차: 정상
+    _mock_dart(monkeypatch, list_items=items)
+    client.post("/api/collect")
+    _wait_done(client)
+    before = client.get("/api/ipos/00534729").json()
+    assert before["indicators"]["competition_rate"] is not None
+
+    # 2회차: parser_version 을 강제로 bump → 저장된 "v3" != "forced-v99" → stale → process_corp 재호출
+    monkeypatch.setattr(collect_mod, "PARSER_VERSION", "forced-v99")
+    # 그 상태에서 download 는 모두 실패 (RuntimeError)
+    def failing_download(*, rcept_no, timeout=20.0):
+        raise RuntimeError("fake network down")
+    monkeypatch.setattr(dart_client, "download_document_zip", failing_download)
+    # 캐시 비움
+    import shutil
+    if (tmp_path / "cache").exists():
+        shutil.rmtree(tmp_path / "cache")
+
+    client.post("/api/collect")
+    s = _wait_done(client)
+
+    # SUCCEEDED (전체 작업은 성공) 지만 failed_count >=1
+    assert s["summary"]["failed_count"] >= 1
+    assert len(s["failures"]) >= 1
+    assert s["failures"][0]["corp_code"] == "00534729"
+
+    # 핵심: 기존 데이터가 **보존** 되어야 함
+    after = client.get("/api/ipos/00534729").json()
+    assert after["indicators"]["competition_rate"] == before["indicators"]["competition_rate"]
+    assert after["indicators"]["price_position"] == before["indicators"]["price_position"]
+    assert after["final_price"] == before["final_price"]
+
+
+def test_failures_reason_sanitized_of_secrets(client, monkeypatch, tmp_path):
+    """실패 사유에 TURSO/DART 토큰·내부 경로 노출 금지."""
+    from app import collect as collect_mod, dart_client
+    from app.config import get_settings
+    monkeypatch.setattr(collect_mod, "CACHE_DIR", tmp_path / "cache")
+    s = get_settings()
+    s.dart_cert_key = "SUPERSECRETDARTKEY"
+
+    items = [_disc("20261012000308", "[발행조건확정]증권신고서(지분증권)",
+                   "00534729", "디티에스")]
+    _mock_dart(monkeypatch, list_items=items)
+
+    # 1회차: 정상 수집 — 저장된 종목 하나 생성
+    client.post("/api/collect")
+    _wait_done(client)
+
+    # 2회차: parser_version bump + 캐시 비움 (Render 재시작 시나리오) + download 실패에 시크릿 포함
+    monkeypatch.setattr(collect_mod, "PARSER_VERSION", "forced-v99")
+    import shutil
+    if collect_mod.CACHE_DIR.exists():
+        shutil.rmtree(collect_mod.CACHE_DIR)
+
+    def leaky_download(*, rcept_no, timeout=20.0):
+        raise RuntimeError(f"error with key=SUPERSECRETDARTKEY at C:/workspace/recommend_ipo/secret.txt")
+    monkeypatch.setattr(dart_client, "download_document_zip", leaky_download)
+
+    client.post("/api/collect")
+    done = _wait_done(client)
+    assert done["failures"]
+    reason = done["failures"][0]["reason"]
+    assert "SUPERSECRETDARTKEY" not in reason
+    assert "C:/workspace" not in reason
 
 
 def test_persistence_check_failed_marks_failed(client, monkeypatch):

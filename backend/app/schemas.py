@@ -138,11 +138,19 @@ class CollectSummary(BaseModel):
     withdrawn_count: int = 0
 
 
+class CollectFailure(BaseModel):
+    """v1.3 (지시 #22): 종목 단위 실패 사유 — 키·URL 미노출."""
+    corp_code: str
+    corp_name: str
+    reason: str
+
+
 class CollectStatus(BaseModel):
     status: CollectRunStatus
     started_at: Optional[str] = None
     finished_at: Optional[str] = None
     progress: Optional[CollectProgress] = None
     summary: Optional[CollectSummary] = None
+    failures: list[CollectFailure] = Field(default_factory=list)  # v1.3 (지시 #22)
     error: Optional[str] = None
     last_collected_at: Optional[str] = None

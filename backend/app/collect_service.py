@@ -19,7 +19,7 @@ from . import collect as collect_mod
 from . import dart_client, store
 from .config import get_settings
 from .parser import parse
-from .schemas import CollectProgress, CollectStatus, CollectSummary
+from .schemas import CollectFailure, CollectProgress, CollectStatus, CollectSummary
 from .time_utils import KST, kst_days_ago, now_iso_kst, now_kst
 
 
@@ -44,6 +44,7 @@ def current_status() -> CollectStatus:
         finished_at=s["finished_at"],
         progress=s["progress"],
         summary=s["summary"],
+        failures=s.get("failures") or [],
         error=s["error"],
         last_collected_at=store.last_collected_at(),
     )
@@ -70,6 +71,7 @@ def try_start() -> tuple[bool, CollectStatus]:
         finished_at=None,
         progress=CollectProgress(done=0, total=None),
         summary=CollectSummary(),
+        failures=[],
         error=None,
     )
     thread = threading.Thread(target=_run_safely, name="collect-worker", daemon=True)
@@ -169,9 +171,15 @@ def _run() -> None:
     _set(progress=CollectProgress(done=0, total=total_disclosures))
 
     summary = CollectSummary()
+    failures: list[CollectFailure] = []
     done = 0
 
+    def _add_failure(corp_code: str, corp_name: str, reason: str) -> None:
+        reason = _sanitize_error_text(reason)
+        failures.append(CollectFailure(corp_code=corp_code, corp_name=corp_name, reason=reason))
+
     for corp_code, items in grouped.items():
+        corp_name = items[-1].get("corp_name", corp_code)
         try:
             new_items = [it for it in items if it["rcept_no"] not in known]
             is_stale = corp_code in stale_corp_codes
@@ -193,19 +201,23 @@ def _run() -> None:
                 continue
 
             is_new = corp_code not in existing_corp_codes
-            collect_mod.process_corp(corp_code, items, log=[])
-            if is_new:
+            r = collect_mod.process_corp(corp_code, items, log=[])
+            # 지시 #22: 다운로드/파싱 실패 → upsert skip 반환값으로 처리
+            if r.get("status") in ("download_failed", "parse_empty"):
+                summary.failed_count += 1
+                _add_failure(corp_code, corp_name, r.get("reason") or r["status"])
+            elif is_new:
                 summary.new_count += 1
             else:
                 summary.updated_count += 1
         except Exception as e:  # 종목 단위 오류 격리
             summary.failed_count += 1
-            _ = _sanitize_error(e)
+            _add_failure(corp_code, corp_name, _sanitize_error(e))
         finally:
             # continue/정상/예외 모두 여기 한 번만 가산
             done += len(items)
             _set(progress=CollectProgress(done=done, total=total_disclosures),
-                 summary=summary)
+                 summary=summary, failures=failures)
 
     # 완료
     with store.connect() as conn:
@@ -253,6 +265,7 @@ def _run() -> None:
         status="SUCCEEDED",
         finished_at=now_iso_kst(),
         summary=summary,
+        failures=failures,
         progress=CollectProgress(done=done, total=total_disclosures),
     )
 
@@ -260,18 +273,26 @@ def _run() -> None:
 # ---------- 보안: 에러 메시지에서 키·내부 경로 제거 ----------
 
 def _sanitize_error(e: Exception) -> str:
-    msg = f"{type(e).__name__}: {e}"
+    return _sanitize_error_text(f"{type(e).__name__}: {e}")
+
+
+def _sanitize_error_text(msg: str) -> str:
     key = get_settings().dart_cert_key
     if key:
         msg = msg.replace(key, "***")
     collect_key = get_settings().collect_key
     if collect_key:
         msg = msg.replace(collect_key, "***")
-    # Windows/Linux 경로 토큰 제거
+    tdb = get_settings().turso_database_url
+    if tdb:
+        msg = msg.replace(tdb, "<turso-url>")
+    tok = get_settings().turso_auth_token
+    if tok:
+        msg = msg.replace(tok, "<turso-token>")
     import re
     msg = re.sub(r"[A-Za-z]:[\\/][^\s'\"]+", "<path>", msg)
     msg = re.sub(r"/[^\s'\"]*/[^\s'\"]+", "<path>", msg)
-    return msg[:500]
+    return msg[:300]
 
 
 # 테스트용 리셋

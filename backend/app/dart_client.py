@@ -65,17 +65,41 @@ def list_disclosures(
     return r.json()
 
 
+_ZIP_MAGIC = b"PK\x03\x04"
+
+
 def download_document_zip(
     *,
     rcept_no: str,
     timeout: float = _DEFAULT_TIMEOUT,
+    retries: int = 3,
+    retry_backoff_sec: float = 1.5,
 ) -> bytes:
-    """원문 ZIP 다운로드. ZIP 바이트 그대로 반환."""
-    _throttle()
-    r = httpx.get(
-        f"{DART_API}/document.xml",
-        params={"crtfc_key": _key(), "rcept_no": rcept_no},
-        timeout=timeout,
-    )
-    r.raise_for_status()
-    return r.content
+    """원문 ZIP 다운로드. 지시 #22: 일시 오류(014 "파일이 존재하지 않습니다"·네트워크 timeout)에 재시도.
+
+    - OpenDART 가 간혹 ZIP 대신 XML `<result><status>014</status>…</result>` 를 돌려주는 경우가 있음.
+      ZIP 매직(`PK\\x03\\x04`) 로 시작하지 않으면 "실패" 로 간주해 재시도.
+    - 재시도 간격: retry_backoff_sec × 시도번호 (1.5·3·4.5 초 정도).
+    - 모든 시도 실패 시 RuntimeError 전파 → 호출자(process_corp)가 "download_failed" 분기로 처리.
+    """
+    last_err: Optional[str] = None
+    for attempt in range(1, retries + 1):
+        _throttle()
+        try:
+            r = httpx.get(
+                f"{DART_API}/document.xml",
+                params={"crtfc_key": _key(), "rcept_no": rcept_no},
+                timeout=timeout,
+            )
+            r.raise_for_status()
+            data = r.content
+            if data.startswith(_ZIP_MAGIC):
+                return data
+            # ZIP 아님 — status 014 등 JSON/XML 응답. 재시도.
+            last_err = f"응답이 ZIP 아님(attempt {attempt}, 크기 {len(data)}B)"
+        except httpx.HTTPError as e:
+            last_err = f"HTTP {type(e).__name__}(attempt {attempt})"
+        if attempt < retries:
+            import time as _time
+            _time.sleep(retry_backoff_sec * attempt)
+    raise RuntimeError(f"원문 다운로드 {retries}회 실패 — {last_err}")
