@@ -631,6 +631,68 @@ def test_price_confirm_date_prefers_parsed_explicit_over_fallback(client, monkey
     assert d["demand_forecast_end"] == "2026-10-14"
 
 
+def test_29_offering_amount_coalesce_exception_null_overrides_old(client, monkeypatch, tmp_path):
+    """지시 #29: COALESCE 예외 — offering_amount_krw 는 excluded 로 교체(null 포함).
+    1회차에 확정가로 저장 → 2회차에 확정가 없음 상태로 재파싱 → **null 로 교체**(기존 값 유지 안 함).
+    """
+    from app import collect as collect_mod, dart_client as _dc
+    monkeypatch.setattr(collect_mod, "CACHE_DIR", tmp_path / "cache")
+
+    first_disc = _disc("20260901000011", "[발행조건확정]증권신고서(지분증권)",
+                       "02222222", "테스트", rcept_dt="20260901")
+    first_xml = (
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<DOC>'
+        '<P>공모희망가액 범위(10,000원 ~ 12,000원)</P>'
+        '<P>확정공모가액 12,000원</P>'
+        '<P>본 공시 접수일 2026-09-01</P>'
+        '<P>청약기간: 2026년 9월 10일 ~ 2026년 9월 11일</P>'
+        '<P>모집(매출)주식수 1,000,000주</P>'
+        '<TR><TD>경쟁률</TD><TD>1</TD><TD>2</TD><TD>3</TD><TD>4</TD><TD>5</TD><TD>6</TD><TD>7</TD><TD>8</TD><TD>9</TD><TD>1200.00</TD></TR>'
+        '<TR><TD>수량</TD><TD>1</TD><TD>2</TD><TD>3</TD><TD>4</TD><TD>5</TD><TD>6</TD><TD>7</TD><TD>8</TD><TD>9</TD><TD>500000</TD></TR>'
+        '</DOC>'
+    )
+    monkeypatch.setattr(_dc, "list_disclosures", lambda **kw: _list_resp([first_disc]))
+    monkeypatch.setattr(_dc, "download_document_zip",
+                        lambda *, rcept_no, timeout=20.0: _zip_bytes(first_xml))
+
+    client.post("/api/collect")
+    _wait_done(client)
+    first_detail = client.get("/api/ipos/02222222").json()
+    assert first_detail["indicators"]["offering_amount_krw"] == 1_000_000 * 12_000
+
+    # 2회차: parser_version bump + 발행조건확정 → 기재정정(확정가 지워짐) 로 교체
+    monkeypatch.setattr(collect_mod, "PARSER_VERSION", "forced-v99")
+    amended = _disc("20260905000022", "[기재정정]증권신고서(지분증권)",
+                    "02222222", "테스트", rcept_dt="20260905")
+    amended_xml = (
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<DOC>'
+        '<P>공모희망가액 범위(10,000원 ~ 12,000원)</P>'
+        # 확정가 삭제됨
+        '<P>본 공시 접수일 2026-09-05</P>'
+        '<P>청약기간: 2026년 9월 10일 ~ 2026년 9월 11일</P>'
+        '<P>모집(매출)주식수 1,000,000주</P>'
+        '</DOC>'
+    )
+    def fake_list_v2(**kw):
+        return _list_resp([amended])
+    def fake_dl_v2(*, rcept_no, timeout=20.0):
+        return _zip_bytes(amended_xml)
+    monkeypatch.setattr(_dc, "list_disclosures", fake_list_v2)
+    monkeypatch.setattr(_dc, "download_document_zip", fake_dl_v2)
+    import shutil
+    if (tmp_path / "cache").exists():
+        shutil.rmtree(tmp_path / "cache")
+
+    client.post("/api/collect")
+    _wait_done(client)
+    second_detail = client.get("/api/ipos/02222222").json()
+    # 파생 필드: 확정가 사라졌으므로 offering_amount_krw / price_position null 로 교체되어야 함
+    assert second_detail["indicators"]["offering_amount_krw"] is None
+    assert second_detail["indicators"]["price_position"] is None
+
+
 def test_underwriters_persisted_and_returned(client, monkeypatch, tmp_path):
     """지시 #21: process_corp 가 추출한 underwriters 가 저장되어 IpoDetail 응답에 노출."""
     from app import collect as collect_mod, dart_client as _dc

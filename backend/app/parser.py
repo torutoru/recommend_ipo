@@ -691,10 +691,11 @@ def parse(
                 f"— 명시값 거부, fallback 산출로 전환"
             )
             explicit_amount = None
-    # 지시 #75aebc23: 확정가 전에는 **null** 고정.
-    # - final_price 가 없으면 원문 명시값(explicit_amount)도 "최저가액 기준(예정)" 일 가능성 → null
-    # - fallback total_offering_count × band_low 도 제거 (가산 기준이 밴드 하단 기반이 되는 오해 방지)
-    # - final_price 가 있으면 원문 명시 우선, 없으면 total × final 로 산출
+    # 지시 #75aebc23 + #29: 공모 금액 산출 규칙
+    # 1) final_price 없음 → **null** (band_low 추정·"최저가액 기준(예정)" 명시 모두 거부)
+    # 2) final_price 있고 total_offering_count 있으면 → **total × final_price 우선**
+    #    (원문 "모집(매출)총액" 매치가 신고서의 '최저가액 기준 예정 총액' 을 확정 후에도 담고 있어 신뢰 불가)
+    # 3) final_price 있고 total 없으면 → explicit_amount (최후 수단)
     if out.final_price is None:
         out.offering_amount_krw = None
         if explicit_amount is not None:
@@ -704,10 +705,17 @@ def parse(
             )
         else:
             out.warnings.append("공모 금액: 확정가 전이라 null (band_low 추정 제거)")
+    elif out.total_offering_count is not None:
+        # 재계산 우선 — 원문 explicit 는 "최저가액 기준(예정)" 가능성이 있어 신뢰 안 함(지시 #29)
+        out.offering_amount_krw = out.total_offering_count * out.final_price
+        if explicit_amount is not None and explicit_amount != out.offering_amount_krw:
+            out.warnings.append(
+                f"공모 금액: 원문 명시 {explicit_amount:,}원 과 total×final "
+                f"{out.offering_amount_krw:,}원 불일치 — 재계산값 채택(지시 #29)"
+            )
     elif explicit_amount is not None:
         out.offering_amount_krw = explicit_amount
-    elif out.total_offering_count is not None:
-        out.offering_amount_krw = out.total_offering_count * out.final_price
+        out.warnings.append("공모 금액: total 없이 원문 명시값 사용 — 신뢰도 낮음")
     else:
         out.offering_amount_krw = None
         out.warnings.append("공모 금액: 확정가 있으나 원문·총수량 모두 없음 — null")

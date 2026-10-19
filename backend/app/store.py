@@ -205,19 +205,23 @@ def upsert_ipo(
             band_low              = COALESCE(excluded.band_low, ipos.band_low),
             band_high             = COALESCE(excluded.band_high, ipos.band_high),
             final_price           = COALESCE(excluded.final_price, ipos.final_price),
-            price_position        = COALESCE(excluded.price_position, ipos.price_position),
+            -- 지시 #29: price_position 은 final_price + band 로부터 파생 → **excluded 교체**(null 포함)
+            price_position        = excluded.price_position,
             competition_rate      = COALESCE(excluded.competition_rate, ipos.competition_rate),
             competition_rate_type = COALESCE(excluded.competition_rate_type, ipos.competition_rate_type),
             demand_quantity       = COALESCE(excluded.demand_quantity, ipos.demand_quantity),
-            demand_amount_krw     = COALESCE(excluded.demand_amount_krw, ipos.demand_amount_krw),
+            -- 지시 #29: demand_amount_krw 는 demand_quantity × final 파생 → **excluded 교체**
+            demand_amount_krw     = excluded.demand_amount_krw,
             lockup_ratio          = COALESCE(excluded.lockup_ratio, ipos.lockup_ratio),
             lockup_ratio_basis    = COALESCE(excluded.lockup_ratio_basis, ipos.lockup_ratio_basis),
             tradable_ratio        = COALESCE(excluded.tradable_ratio, ipos.tradable_ratio),
-            old_share_ratio       = COALESCE(excluded.old_share_ratio, ipos.old_share_ratio),
+            -- 지시 #29: old_share_ratio 는 old / total 파생 → **excluded 교체**
+            old_share_ratio       = excluded.old_share_ratio,
             new_share_count       = COALESCE(excluded.new_share_count, ipos.new_share_count),
             old_share_count       = COALESCE(excluded.old_share_count, ipos.old_share_count),
             total_offering_count  = COALESCE(excluded.total_offering_count, ipos.total_offering_count),
-            offering_amount_krw   = COALESCE(excluded.offering_amount_krw, ipos.offering_amount_krw),
+            -- 지시 #29: offering_amount_krw 는 total × final 파생 → **excluded 교체**(null 포함)
+            offering_amount_krw   = excluded.offering_amount_krw,
             report_rcept_no       = COALESCE(excluded.report_rcept_no, ipos.report_rcept_no),
             price_confirm_date    = COALESCE(excluded.price_confirm_date, ipos.price_confirm_date),
             demand_forecast_start = COALESCE(excluded.demand_forecast_start, ipos.demand_forecast_start),

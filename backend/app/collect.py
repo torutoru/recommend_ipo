@@ -56,7 +56,8 @@ DART_URL = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo="
 #   v8 — 지시 #17 (CORRECTION 상태 — 정정요구/기재정정 접수일 추적)
 #   v9 — 지시 #28 (공지 다운로드 가드 + DB stale-only 재처리 + 투자설명서 수요예측 보강)
 #   v10 — 지시 #21(주관사 서술 추출) + #75aebc23 (확정가 전 공모 금액 null)
-PARSER_VERSION = "v10"
+#   v11 — 지시 #29 (공모 금액 total×final 우선 + 파생 필드 COALESCE 예외)
+PARSER_VERSION = "v11"
 
 
 # ---------- 분류 ----------

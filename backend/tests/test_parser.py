@@ -265,11 +265,16 @@ def test_dtis_offering_amount_from_explicit_total(dtis_xml_text):
     assert extract_offering_amount_krw(dtis_xml_text) == 37_891_589_000
 
 
-def test_dtis_parse_offering_amount_prefers_explicit(dtis_xml_bytes):
+def test_dtis_parse_offering_amount_recalculates_total_times_final(dtis_xml_bytes):
+    """지시 #29: 디티에스 — 원문 명시 '379억(17,000 기준 예정)' 거부, total × final(18,500) 재계산."""
     p = parse(dtis_xml_bytes, rcept_no="20261012000308", corp_name="디티에스",
               rcept_dt="2026-10-12")
-    # 디티에스 공모 금액: 명시된 379억 (1000억 미달 → 가산 없음)
-    assert p.offering_amount_krw == 37_891_589_000
+    assert p.final_price == 18_500
+    assert p.total_offering_count is not None
+    # 재계산값: pm 실측 기대값 41,234,964,500 (= 2,229,998 × 18,500 등)
+    assert p.offering_amount_krw == p.total_offering_count * p.final_price
+    # 원문 명시(37,891,589,000)와 **불일치** 경고 포함
+    assert any("불일치" in w and "재계산값" in w for w in p.warnings)
 
 
 # ---------------------- 다비오 — offering_amount 오탐 회귀 (pm 지시 c2f572c5) ----------------------
@@ -555,7 +560,28 @@ def test_offering_amount_explicit_rejected_without_final_price():
 
 
 def test_offering_amount_keeps_explicit_when_final_price_present(dtis_xml_bytes):
-    """final_price 있으면 원문 명시 그대로. (디티에스 fixture — 확정가 18,500 + 명시 총액)."""
+    """지시 #29: final_price 있고 total 있으면 **total × final** 를 우선. 디티에스 확정 18,500."""
     p = parse(dtis_xml_bytes, rcept_no="20261012000308", corp_name="디티에스", rcept_dt="2026-10-12")
-    assert p.final_price is not None
-    assert p.offering_amount_krw is not None   # 명시 총액 그대로
+    assert p.final_price == 18_500
+    assert p.total_offering_count is not None
+    # 재계산 값 (원문 명시 "17,000 기준 예정" 거부)
+    assert p.offering_amount_krw == p.total_offering_count * p.final_price
+
+
+def test_offering_amount_recalculates_total_times_final():
+    """지시 #29: 원문에 '최저가액 기준 예정 총액'이 있어도 total × final 재계산 우선."""
+    xml = (
+        '<DOC>'
+        '<P>공모희망가액 범위(12,600원 ~ 15,300원)</P>'
+        '<P>확정공모가액 15,300원</P>'
+        '<P>본 공시 접수일 2026-10-15</P>'
+        '<P>청약기간: 2026년 10월 20일 ~ 2026년 10월 21일</P>'
+        '<P>모집(매출)총액(예정): 30,240,000,000원</P>'   # 최저가(12,600) 기준 — 거부
+        '<P>모집(매출)주식수 2,400,000주</P>'
+        '</DOC>'
+    ).encode("utf-8")
+    p = parse(xml, rcept_no="x", corp_name="t", rcept_dt="2026-10-15")
+    assert p.final_price == 15_300
+    assert p.total_offering_count == 2_400_000
+    assert p.offering_amount_krw == 2_400_000 * 15_300   # = 36,720,000,000
+    assert any("불일치" in w and "재계산값" in w for w in p.warnings)
