@@ -1,21 +1,23 @@
-"""판정 로직 — v0.3 (하드 필터 폐지, 점수만으로 판정 + 체크리스트).
+"""판정 로직 — v1.4 (지시 #27 — 미확인 지표가 있어도 범위로 PASS/REJECT 가 결정되면 확정).
 
-정본: requirements.md v2 2~4·6·9장 + api-contract.md v0.3 판정 규칙 표.
+정본: requirements.md 2~4·6·9장 + 15-1장 + api-contract.md v1.4 판정 규칙 표.
 기준값은 config_files/scoring.yaml 에서 읽는다(코드 수정 없이 조정).
 
-판정 상태 불변식 (v0.3):
+판정 상태 불변식 (v1.4):
 - PENDING: competition_rate 또는 price_position 중 하나라도 null
-  → scores 전부 null, verdict.grade/score null, reject_reasons 빈 배열
-- PASS: 두 값 모두 있고 총점 >= pass_min (기본 50)
-  → verdict.score == scores.total, grade 는 s_min/a_min 로 구분, reject_reasons 빈 배열
-- REJECT: 두 값 모두 있고 총점 < pass_min
-  → verdict.score == scores.total, grade = null, reject_reasons >= 1
+  → scores 전부 null, verdict.grade/score/score_range null
+- PASS/REJECT (확정):
+  - 모든 지표 확정 → scores.total == verdict.score, score_range null
+  - 미확인 지표의 가능 최소/최대로 산출한 범위 [min, max] 가 **같은 쪽으로 쏠릴 때**:
+    max < pass_min → REJECT, verdict.score=null, verdict.score_range={min,max}
+    min ≥ pass_min → PASS, 등급은 **min 기준**, verdict.score=null, verdict.score_range={min,max}
+- INCOMPLETE: 범위가 pass_min 을 걸쳐 있어 확정 불가. 확정 지표만 scores 에 값, 범위는 노출.
 
-주: 하드 필터 없음. 미공시 → REJECT 금지 (PENDING).
+주: 하드 필터 없음. 미공시만 → PENDING. 확정된 지표가 걸쳐 있으면 INCOMPLETE.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 from .config import ScoringConfig
@@ -27,6 +29,7 @@ from .schemas import (
     Indicators,
     MinDeposit,
     PricePosition,
+    ScoreRange,
     Scores,
     Status,
     Verdict,
@@ -40,6 +43,7 @@ class EvaluationResult:
     scores: Scores
     reasons: list[str]
     reject_reasons: list[str]
+    score_range: Optional[tuple[int, int]] = None   # v1.4 (지시 #27)
 
 
 # ---------- PENDING ----------
@@ -121,6 +125,49 @@ def _grade(total: int, cfg: ScoringConfig) -> Optional[Grade]:
     if total >= g.a_min:
         return "A"
     return "B"
+
+
+# ---------- v1.4 (지시 #27): 미확인 지표의 가능 점수 집합 ----------
+
+def _lockup_possible_points(ind: Indicators, cfg: ScoringConfig) -> list[int]:
+    """lockup 점수의 가능값. 확정이면 1개, 미확인이면 [0, max] (범위 — 중간값 생략).
+
+    "최소·최대로 결과가 같으면 확정" 이므로 리스트 순서는 min=첫 요소, max=마지막 요소면 충분.
+    """
+    if ind.lockup_ratio is None:
+        return [0, cfg.score.lockup.max]
+    return [_score_lockup(ind.lockup_ratio, cfg)]
+
+
+def _flow_possible_points(ind: Indicators, cfg: ScoringConfig) -> list[int]:
+    """flow 점수의 가능값 (requirements 15-1장 명세).
+
+    - tradable null → {0, otherwise, top_pt}
+    - tradable_ratio > zero_if.tradable_gt → {0} 확정
+    - tradable < top_if.tradable_lt 이고 old null → {0, otherwise, top_pt}
+    - top_if.tradable_lt ≤ tradable ≤ zero_if.tradable_gt 이고 old null → {0, otherwise}
+    - 모두 확정 → {실제 점수}
+    """
+    s = cfg.score.flow
+    zero_pt = 0
+    other_pt = s.otherwise
+    top_pt = s.top_if.points
+
+    if ind.tradable_ratio is None:
+        return sorted({zero_pt, other_pt, top_pt})
+
+    if ind.tradable_ratio > s.zero_if.tradable_gt:
+        # old_share 가 뭐든 0 확정
+        return [zero_pt]
+
+    if ind.old_share_ratio is None:
+        if ind.tradable_ratio < s.top_if.tradable_lt:
+            return sorted({zero_pt, other_pt, top_pt})
+        else:
+            # top_if 매치 불가(tradable_lt 조건 실패) → top_pt 제외
+            return sorted({zero_pt, other_pt})
+
+    return [_score_flow(ind.tradable_ratio, ind.old_share_ratio, cfg)]
 
 
 # ---------- 근거 문장 ----------
@@ -211,7 +258,11 @@ def _incomplete_reasons(ind: Indicators) -> list[str]:
 # ---------- 공개 API ----------
 
 def evaluate(ind: Indicators, cfg: ScoringConfig) -> EvaluationResult:
-    """지표를 받아 상태·점수·등급·근거를 계산."""
+    """지표를 받아 상태·점수·등급·근거를 계산.
+
+    v1.4 (지시 #27): 미확인 지표가 있어도 가능 점수 범위 [min,max] 가 pass_min 기준 한쪽으로
+    쏠리면 PASS/REJECT 로 확정. 걸쳐 있으면 INCOMPLETE.
+    """
     if _is_pending(ind):
         return EvaluationResult(
             status="PENDING",
@@ -224,47 +275,93 @@ def evaluate(ind: Indicators, cfg: ScoringConfig) -> EvaluationResult:
     assert ind.competition_rate is not None
     assert ind.price_position is not None
 
-    # v1.0 (지시 #19): 미공시 지표가 있으면 INCOMPLETE (0점으로 묻히지 않음).
-    if _is_incomplete(ind):
-        comp, _bonus = _score_comp(ind.competition_rate, ind.offering_amount_krw, cfg)
-        price = _score_price(ind.price_position, cfg)
-        lockup = _score_lockup(ind.lockup_ratio, cfg) if ind.lockup_ratio is not None else None
-        if ind.tradable_ratio is not None and (ind.tradable_ratio > 35 or ind.old_share_ratio is not None):
-            flow = _score_flow(ind.tradable_ratio, ind.old_share_ratio, cfg)
-        else:
-            flow = None
+    comp, bonus = _score_comp(ind.competition_rate, ind.offering_amount_krw, cfg)
+    price = _score_price(ind.price_position, cfg)
+    confirmed_sum = comp + price
+
+    lockup_opts = _lockup_possible_points(ind, cfg)
+    flow_opts = _flow_possible_points(ind, cfg)
+
+    min_total = confirmed_sum + lockup_opts[0] + flow_opts[0]
+    max_total = confirmed_sum + lockup_opts[-1] + flow_opts[-1]
+    pass_min = cfg.grade.pass_min
+
+    # 확정 지표 점수 (미확인은 null)
+    lockup_val = _score_lockup(ind.lockup_ratio, cfg) if ind.lockup_ratio is not None else None
+    # flow 가 확정되는 조건: tradable/old 둘 다 있거나, tradable>35 (→ 0 확정)
+    if ind.tradable_ratio is not None and (
+        ind.tradable_ratio > cfg.score.flow.zero_if.tradable_gt or ind.old_share_ratio is not None
+    ):
+        flow_val = _score_flow(ind.tradable_ratio, ind.old_share_ratio, cfg)
+    else:
+        flow_val = None
+
+    all_confirmed = (lockup_val is not None) and (flow_val is not None)
+
+    if all_confirmed:
+        total = confirmed_sum + lockup_val + flow_val
+        scores = Scores(comp=comp, price=price, lockup=lockup_val, flow=flow_val, total=total)
+        reasons = _reason_lines(ind, scores, bonus, cfg)
+        grade = _grade(total, cfg)
+        if grade is None:
+            return EvaluationResult(
+                status="REJECT",
+                grade=None,
+                scores=scores,
+                reasons=reasons,
+                reject_reasons=[f"종합 점수 {total}점 — {pass_min}점 미만"],
+            )
         return EvaluationResult(
-            status="INCOMPLETE",
-            grade=None,
-            scores=Scores(comp=comp, price=price, lockup=lockup, flow=flow, total=None),
-            reasons=_incomplete_reasons(ind),
+            status="PASS",
+            grade=grade,
+            scores=scores,
+            reasons=reasons,
             reject_reasons=[],
         )
 
-    comp, bonus = _score_comp(ind.competition_rate, ind.offering_amount_krw, cfg)
-    price = _score_price(ind.price_position, cfg)
-    lockup = _score_lockup(ind.lockup_ratio, cfg)
-    flow = _score_flow(ind.tradable_ratio, ind.old_share_ratio, cfg)
-    total = comp + price + lockup + flow
-    scores = Scores(comp=comp, price=price, lockup=lockup, flow=flow, total=total)
-    reasons = _reason_lines(ind, scores, bonus, cfg)
-    grade = _grade(total, cfg)
+    # 미확인 지표 있음 — 범위 확정 / INCOMPLETE 분기 (지시 #27)
+    scores_partial = Scores(
+        comp=comp, price=price, lockup=lockup_val, flow=flow_val, total=None,
+    )
 
-    if grade is None:
+    if max_total < pass_min:
+        # REJECT 확정 — 만점 가정해도 50 미만
+        reject_line = (
+            f"미확인 지표를 만점으로 가정해도 최대 {max_total}점 — {pass_min}점 미만"
+        )
         return EvaluationResult(
             status="REJECT",
             grade=None,
-            scores=scores,
-            reasons=reasons,
-            reject_reasons=[f"종합 점수 {total}점 — {cfg.grade.pass_min}점 미만"],
+            scores=scores_partial,
+            reasons=_incomplete_reasons(ind),
+            reject_reasons=[reject_line],
+            score_range=(min_total, max_total),
         )
 
+    if min_total >= pass_min:
+        # PASS 확정 — 0점 가정해도 50 이상. 등급은 min 기준(최소 보장)
+        min_grade = _grade(min_total, cfg)
+        reasons = _incomplete_reasons(ind)
+        reasons.append(
+            f"미확인 지표를 0점 가정 시에도 {min_total}점 — 최소 {min_grade}등급"
+        )
+        return EvaluationResult(
+            status="PASS",
+            grade=min_grade,
+            scores=scores_partial,
+            reasons=reasons,
+            reject_reasons=[],
+            score_range=(min_total, max_total),
+        )
+
+    # 그 외 — INCOMPLETE (범위가 pass_min 을 걸침)
     return EvaluationResult(
-        status="PASS",
-        grade=grade,
-        scores=scores,
-        reasons=reasons,
+        status="INCOMPLETE",
+        grade=None,
+        scores=scores_partial,
+        reasons=_incomplete_reasons(ind),
         reject_reasons=[],
+        score_range=(min_total, max_total),
     )
 
 
@@ -454,5 +551,15 @@ def summary_from_detail(detail: IpoDetail) -> IpoSummary:
 
 
 def build_verdict(result: EvaluationResult) -> Verdict:
-    """불변식: PASS·REJECT 모두 score 존재(scores.total 과 동일). grade 는 PASS 일 때만."""
-    return Verdict(status=result.status, grade=result.grade, score=result.scores.total)
+    """v1.4: PASS/REJECT 가 전지표 확정이면 score=scores.total, score_range=null.
+    범위로 확정된 경우에는 score=null, score_range={min,max}. grade 는 PASS 일 때만.
+    """
+    score_range: Optional[ScoreRange] = None
+    if result.score_range is not None:
+        score_range = ScoreRange(min=result.score_range[0], max=result.score_range[1])
+    return Verdict(
+        status=result.status,
+        grade=result.grade,
+        score=result.scores.total,
+        score_range=score_range,
+    )

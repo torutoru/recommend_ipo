@@ -304,30 +304,139 @@ def test_flow_otherwise(cfg):
     assert r.scores.flow == 12
 
 
-# ---------------------- 미공시 (0점 + reasons) ----------------------
+# ---------------------- 미공시 (v1.4 — 지시 #27 범위 확정) ----------------------
 
-def test_null_lockup_marks_incomplete(cfg):
-    """v1.0 (지시 #19): lockup null 이면 0점이 아니라 INCOMPLETE."""
+def test_null_lockup_still_pass_when_range_locked(cfg):
+    """v1.4 (지시 #27): lockup null 이지만 나머지가 충분하면 PASS 확정 — min 기준 등급."""
     r = evaluate(_ind(lockup_ratio=None), cfg)
-    assert r.status == "INCOMPLETE"
+    # comp 35 + price 20 + flow 20 (tradable 20·old 0 → top_if) = 75 (lockup 0 가정 min)
+    # max = 75 + 20 = 95. min=75 >= 50 → PASS 확정
+    assert r.status == "PASS"
     assert r.scores.lockup is None
     assert r.scores.total is None
-    assert any("확약" in line and ("확인 필요" in line or "판정 보류" in line) for line in r.reasons)
+    assert r.score_range is not None and r.score_range == (75, 95)
+    # 등급은 min(75) 기준 — A (65 ≤ 75 < 80)
+    assert r.grade == "A"
+    assert any("최소" in line and "등급" in line for line in r.reasons)
 
 
-def test_null_flow_pair_marks_incomplete(cfg):
-    """v1.0: tradable null → INCOMPLETE (0점 아님)."""
+def test_null_flow_pair_still_pass_when_range_locked(cfg):
+    """v1.4: tradable null + old null 이지만 min=75 이상이면 PASS 확정."""
     r = evaluate(_ind(tradable_ratio=None, old_share_ratio=None), cfg)
-    assert r.status == "INCOMPLETE"
+    # comp 35 + price 20 + lockup 20 + flow {0,12,20} → min=75, max=95
+    assert r.status == "PASS"
     assert r.scores.flow is None
-    assert any("유통가능" in line and ("확인 필요" in line or "판정 보류" in line) for line in r.reasons)
+    assert r.score_range == (75, 95)
+    assert r.grade == "A"
 
 
 def test_tradable_above_35_with_old_null_still_proceeds(cfg):
-    """v1.0: tradable > 35 이면 flow=0 로 확정되므로 old_share null 이어도 PASS/REJECT 진행."""
+    """v1.0 유지: tradable > 35 → flow=0 확정 → scores.flow 에 0 들어감."""
     r = evaluate(_ind(tradable_ratio=40.0, old_share_ratio=None), cfg)
-    assert r.status in ("PASS", "REJECT")
+    # confirmed: comp 35 + price 20 + lockup 20 + flow 0 = 75 → PASS/A
+    assert r.status == "PASS"
     assert r.scores.flow == 0
+    assert r.score_range is None   # 모든 지표 확정 → 범위 없음
+
+
+# ---------------------- 지시 #27: 범위 확정 (PASS / REJECT / INCOMPLETE) ----------------------
+
+def test_27_incomplete_when_range_straddles_pass_min(cfg):
+    """크리에이츠 시나리오: comp 0 + price 10 + lockup null + tradable null
+    → min=10+0+0=10, max=10+20+20=50. max=50 은 50 미만 아님, min<50 → INCOMPLETE."""
+    r = evaluate(_ind(
+        competition_rate=240.46,         # tier 미달 → 0점
+        price_position="WITHIN_BAND",     # 10점
+        offering_amount_krw=1_000_000_000,
+        lockup_ratio=None,
+        tradable_ratio=None,
+        old_share_ratio=0.0,
+    ), cfg)
+    assert r.status == "INCOMPLETE"
+    assert r.grade is None
+    assert r.scores.total is None
+    assert r.score_range == (10, 50)
+
+
+def test_27_reject_confirmed_when_max_below_pass_min(cfg):
+    """max 가 pass_min 미만이면 REJECT 확정 (미확인 지표를 만점으로 가정해도 미달)."""
+    # comp 0 + price 0 + lockup null + flow 확정(tradable>35 → 0) → min=max=0 → REJECT
+    r = evaluate(_ind(
+        competition_rate=100.0,          # 0점
+        price_position="BELOW_BAND",      # 0점
+        lockup_ratio=None,                # 가능범위 [0,20]
+        tradable_ratio=50.0,              # > 35 → flow=0 확정
+        old_share_ratio=None,
+    ), cfg)
+    assert r.status == "REJECT"
+    assert r.scores.total is None
+    assert r.score_range == (0, 20)
+    assert any("최대" in line and "50" in line for line in r.reject_reasons)
+
+
+def test_27_pass_confirmed_when_min_above_pass_min(cfg):
+    """min 이 pass_min 이상이면 PASS 확정 (0점 가정해도 통과). 등급은 min 기준."""
+    # 기본 _ind 는 tradable 20 · old 0 → flow 20 확정. lockup 만 null:
+    # comp 35 + price 20 + flow 20 = 75 → min=75(+0 lockup), max=95(+20 lockup). min≥50 → PASS/A
+    r = evaluate(_ind(lockup_ratio=None), cfg)
+    assert r.status == "PASS"
+    assert r.grade == "A"
+    assert r.score_range == (75, 95)
+
+
+def test_27_flow_subset_tradable_less_than_25_old_null(cfg):
+    """tradable < 25 & old null → flow 가능값 {0, 12, 20}."""
+    # comp 35 + price 20 + lockup 20 + flow {0,12,20} → min=75, max=95 → PASS/A
+    r = evaluate(_ind(tradable_ratio=20.0, old_share_ratio=None), cfg)
+    assert r.status == "PASS"
+    assert r.grade == "A"
+    assert r.score_range == (75, 95)
+
+
+def test_27_flow_subset_25_to_35_old_null(cfg):
+    """25 ≤ tradable ≤ 35 & old null → flow 가능값 {0, 12} (top_if 불가)."""
+    # comp 35 + price 20 + lockup 20 + flow {0, 12} → min=75, max=87 → PASS/A (65 ≤ 75)
+    r = evaluate(_ind(tradable_ratio=30.0, old_share_ratio=None), cfg)
+    assert r.status == "PASS"
+    assert r.scores.flow is None       # old_share 가 null 이라 flow 미확정
+    assert r.score_range == (75, 87)   # min=20(lockup)+0, max=20(lockup)+12 를 confirmed_sum 55 에 더함
+
+
+def test_27_boundary_min_equals_pass_min_is_pass(cfg):
+    """경계: min == pass_min(50) → PASS 확정 (명세: '**min ≥ 50**')."""
+    # comp 15 (rate 600 → tier 500) + price 10 (WITHIN) + lockup null + flow 확정 25...
+    # 손쉽게: comp 25 (rate 1000) + price 25 (ABOVE) + lockup null → min = 50
+    # flow 확정 되게 tradable>35: flow=0
+    r = evaluate(_ind(
+        competition_rate=1000.0,
+        price_position="ABOVE_BAND",      # 25
+        lockup_ratio=None,                # [0,20]
+        tradable_ratio=50.0,              # flow=0 확정
+        old_share_ratio=None,
+    ), cfg)
+    # confirmed = 25 + 25 + 0 = 50. lockup opts [0,20] → min=50, max=70
+    assert r.status == "PASS"
+    assert r.score_range == (50, 70)
+    assert r.grade == "B"   # 50 → B (65 미만)
+
+
+def test_27_verdict_carries_score_range_when_range_locked(cfg):
+    """build_verdict 는 score_range 가 있으면 그대로 노출, score 는 null."""
+    r = evaluate(_ind(lockup_ratio=None), cfg)
+    v = build_verdict(r)
+    assert v.status == "PASS"
+    assert v.score is None
+    assert v.score_range is not None
+    assert v.score_range.min == 75
+    assert v.score_range.max == 95
+
+
+def test_27_verdict_score_range_null_when_all_confirmed(cfg):
+    """모든 지표 확정이면 score_range null."""
+    r = evaluate(_ind(), cfg)
+    v = build_verdict(r)
+    assert v.score is not None
+    assert v.score_range is None
 
 
 # ---------------------- 증거금 v0.3 ----------------------

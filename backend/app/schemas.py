@@ -34,10 +34,21 @@ ChecklistKey = Literal[
 ChecklistResult = Literal["MET", "NOT_MET", "UNKNOWN", "INFO"]
 
 
+class ScoreRange(BaseModel):
+    """v1.4 (지시 #27): 미확인 지표가 있지만 범위로 PASS/REJECT 가 확정된 경우 노출.
+
+    `score`·`scores.total` 은 null, 이 필드에 가능 점수 범위가 들어간다.
+    PASS 등급은 `min` 기준(최소 보장 등급).
+    """
+    min: int = Field(ge=0, le=100)
+    max: int = Field(ge=0, le=100)
+
+
 class Verdict(BaseModel):
     status: Status
     grade: Optional[Grade] = None
     score: Optional[int] = Field(default=None, ge=0, le=100)
+    score_range: Optional[ScoreRange] = None   # v1.4 (지시 #27)
 
 
 class IpoSummary(BaseModel):

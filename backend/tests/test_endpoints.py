@@ -104,15 +104,17 @@ def test_detail_pass_s(client):
     assert d["indicators"]["price_position"] == "ABOVE_BAND"
 
 
-def test_detail_incomplete_lockup_unknown(client):
-    """v1.0 (지시 #19): 북극로보틱스 (00990005) — lockup=null → **INCOMPLETE**, 체크리스트 lockup UNKNOWN.
-    (기존 'PASS A + 0점' 가정은 미공시가 잘못된 REJECT/확정으로 묻히는 문제가 있어 폐지.)
-    """
+def test_detail_pass_range_locked_lockup_unknown(client):
+    """v1.4 (지시 #27): 북극로보틱스 (00990005) — lockup=null 이지만 min=75 ≥ 50
+    → **PASS 확정**, 등급은 min 기준(A). score·scores.total 은 null, score_range 노출.
+    체크리스트 lockup 은 여전히 UNKNOWN(지표 자체는 미확인)."""
     d = client.get("/api/ipos/00990005").json()
-    assert d["verdict"]["status"] == "INCOMPLETE"
-    assert d["verdict"]["grade"] is None
+    assert d["verdict"]["status"] == "PASS"
+    assert d["verdict"]["grade"] == "A"
+    assert d["verdict"]["score"] is None
+    assert d["verdict"]["score_range"] == {"min": 75, "max": 95}
     assert d["scores"]["total"] is None
-    assert d["scores"]["lockup"] is None
+    assert d["scores"]["lockup"] is None   # 확정 지표만 scores 에 값, 미확인은 null
     checklist = {c["key"]: c for c in d["checklist"]}
     assert checklist["lockup"]["result"] == "UNKNOWN"
     assert checklist["lockup"]["actual"] is None
