@@ -374,6 +374,70 @@ def test_store_connect_no_fallback_on_turso_failure(monkeypatch):
             conn.execute("SELECT 1")
 
 
+def test_400_body_included_in_error(monkeypatch):
+    """지시 #23: Turso 400 응답의 SQL 에러 본문이 TursoConnectError 에 포함돼야 운영 디버그 가능."""
+    s = get_settings()
+    s.turso_database_url = "libsql://fake.turso.io"
+    s.turso_auth_token = "faketoken"
+
+    def http_400(req):
+        return httpx.Response(
+            400,
+            text='{"error":"no such column: parser_version"}',
+        )
+
+    transport = httpx.MockTransport(http_400)
+    original_init = httpx.Client.__init__
+
+    def patched_init(self, *args, **kwargs):
+        kwargs.setdefault("transport", transport)
+        original_init(self, *args, **kwargs)
+    monkeypatch.setattr(httpx.Client, "__init__", patched_init)
+
+    from app.turso_adapter import connect_turso
+    with pytest.raises(TursoConnectError) as exc:
+        with connect_turso() as c:
+            c.execute("INSERT INTO ipos (corp_code, parser_version) VALUES (?,?)", ("x", "v3"))
+    msg = str(exc.value)
+    assert "400" in msg
+    # 에러 본문 (SQL 메시지) 포함
+    assert "no such column" in msg or "parser_version" in msg
+    # SQL hint 포함 (문제가 되는 statement 가 뭔지 보임)
+    assert "INSERT INTO ipos" in msg
+    # 토큰·전체 URL 미노출
+    assert "faketoken" not in msg
+    assert "fake.turso.io" not in msg
+
+
+def test_sql_error_response_includes_sql_hint(monkeypatch):
+    """results 안의 type=error 도 SQL hint 를 포함해야 함."""
+    s = get_settings()
+    s.turso_database_url = "libsql://fake.turso.io"
+    s.turso_auth_token = "faketoken"
+
+    def err_response(req):
+        return httpx.Response(200, json={
+            "baton": None,
+            "results": [{"type": "error", "error": {"message": "syntax error near 'FOO'"}}],
+        })
+
+    transport = httpx.MockTransport(err_response)
+    original_init = httpx.Client.__init__
+
+    def patched_init(self, *args, **kwargs):
+        kwargs.setdefault("transport", transport)
+        original_init(self, *args, **kwargs)
+    monkeypatch.setattr(httpx.Client, "__init__", patched_init)
+
+    from app.turso_adapter import connect_turso
+    with pytest.raises(TursoConnectError) as exc:
+        with connect_turso() as c:
+            c.execute("UPDATE ipos SET x=? WHERE corp_code=?", (1, "y"))
+    msg = str(exc.value)
+    assert "syntax error" in msg
+    assert "UPDATE ipos" in msg
+
+
 def test_token_not_leaked_in_error(monkeypatch):
     s = get_settings()
     s.turso_database_url = "libsql://top-secret-prod.turso.io"

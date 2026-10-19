@@ -125,9 +125,16 @@ def _post_pipeline(client: httpx.Client, base_url: str, token: str, statements: 
             f"Turso HTTP 요청 실패 (url={_mask(base_url)}) — {type(e).__name__}"
         ) from None
     if r.status_code != 200:
-        # 응답 body 에 토큰이 그대로 들어 있을 가능성은 낮지만, 본문도 노출하지 않는다
+        # 지시 #23: 400 등 에러에 서버 응답 본문(SQL 에러 문구)을 포함해 원인 파악 가능하게.
+        # URL/토큰은 치환, 본문 자체에 token 이 포함될 가능성은 낮지만 mask 한 번 더 적용.
+        body_text = _redact(r.text, token)[:600]
+        # 400 요청에서 어떤 statement 가 문제인지 보조 정보(첫 SQL)
+        hint = ""
+        if statements:
+            first_sql = (statements[0].get("sql") or "")[:140]
+            hint = f" first_sql={first_sql!r}"
         raise TursoConnectError(
-            f"Turso HTTP {r.status_code} (url={_mask(base_url)})"
+            f"Turso HTTP {r.status_code} (url={_mask(base_url)}){hint} body={body_text}"
         )
     payload = r.json()
     results = payload.get("results", [])
@@ -135,11 +142,20 @@ def _post_pipeline(client: httpx.Client, base_url: str, token: str, statements: 
     for i, item in enumerate(results[: len(statements)]):
         if item.get("type") == "error":
             err = item.get("error", {})
-            msg = err.get("message", "unknown")
-            raise TursoConnectError(f"Turso SQL 에러 (stmt #{i}): {msg[:200]}")
+            msg = _redact(err.get("message", "unknown"), token)[:400]
+            sql_hint = ""
+            if i < len(statements):
+                sql_hint = f" sql={(statements[i].get('sql') or '')[:140]!r}"
+            raise TursoConnectError(f"Turso SQL 에러 (stmt #{i}): {msg}{sql_hint}")
         resp = item.get("response", {})
         out.append(resp.get("result", {}))
     return out
+
+
+def _redact(text: str, token: str) -> str:
+    if token and token in text:
+        text = text.replace(token, "<token>")
+    return text
 
 
 # ---------- Cursor / Connection ----------
