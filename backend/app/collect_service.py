@@ -271,6 +271,58 @@ def _run() -> None:
             _set(progress=CollectProgress(done=done, total=total_disclosures),
                  summary=summary, failures=failures)
 
+    # 지시 #28: 증분 조회에 안 잡혔지만 DB 에 있고 parser_version 이 낡은 종목도 재처리.
+    # (다비오/유캐스트처럼 최근 공시 없는 종목이 stale 로 남으면 CORRECTION/지표 갱신이 안 됨)
+    unprocessed_stale = stale_corp_codes - set(grouped.keys())
+    for corp_code in unprocessed_stale:
+        corp_name = corp_code
+        try:
+            try:
+                full_items = _fetch_corp_history(corp_code)
+            except Exception as fe:
+                _add_failure(
+                    corp_code, corp_name,
+                    f"stale 종목 전체 이력 조회 실패 — {_sanitize_error(fe)}",
+                )
+                continue
+            filtered_full = [
+                it for it in full_items
+                if collect_mod.is_ipo_candidate(it)
+                or collect_mod.classify_report(it.get("report_nm", "")) == "CORRECTION_REQUEST"
+            ]
+            if not filtered_full:
+                # 조회됐으나 분류 가능한 공시가 없음 — unchanged 로 계수
+                summary.unchanged_count += 1
+                continue
+            items_for_process = sorted(filtered_full, key=lambda d: d.get("rcept_dt", ""))
+            if items_for_process:
+                corp_name = items_for_process[-1].get("corp_name", corp_code)
+
+            # 철회신고서 포함 체크
+            if any(collect_mod.classify_report(x.get("report_nm", "")) == "WITHDRAWN" for x in items_for_process):
+                with store.connect() as conn:
+                    for w in items_for_process:
+                        if collect_mod.classify_report(w.get("report_nm", "")) == "WITHDRAWN":
+                            store.mark_withdrawn(conn, corp_code, w["rcept_no"])
+                            break
+                summary.withdrawn_count += 1
+                continue
+
+            r = collect_mod.process_corp(corp_code, items_for_process, log=[])
+            if r.get("status") in ("download_failed", "parse_empty"):
+                summary.failed_count += 1
+                _add_failure(corp_code, corp_name, r.get("reason") or r["status"])
+            elif r.get("status") == "preserved":
+                summary.unchanged_count += 1
+            else:
+                summary.updated_count += 1
+        except Exception as e:
+            summary.failed_count += 1
+            _add_failure(corp_code, corp_name, _sanitize_error(e))
+        finally:
+            _set(progress=CollectProgress(done=done, total=total_disclosures),
+                 summary=summary, failures=failures)
+
     # 완료
     with store.connect() as conn:
         store.finish_collect_run(

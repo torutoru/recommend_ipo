@@ -54,7 +54,8 @@ DART_URL = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo="
 #   v6 — 지시 #26 (삼성증권 형식 — 확약 섹션 "의무보유 확약 신청내역" 수용 + 유통 서술형 역순)
 #   v7 — 지시 #20 (공모가 확정공고일·수요예측 기간 — 명시 매치 + 발행조건확정 접수일 fallback)
 #   v8 — 지시 #17 (CORRECTION 상태 — 정정요구/기재정정 접수일 추적)
-PARSER_VERSION = "v8"
+#   v9 — 지시 #28 (공지 다운로드 가드 + DB stale-only 재처리 + 투자설명서 수요예측 보강)
+PARSER_VERSION = "v9"
 
 
 # ---------- 분류 ----------
@@ -82,6 +83,15 @@ def classify_report(report_nm: str) -> Optional[str]:
         if pat.search(report_nm):
             return doc_type
     return None
+
+
+def _is_fss_notice_rcept_no(rcept_no: str) -> bool:
+    """지시 #28: 금감원 발행 공시 접수번호 식별 — 9~10번째 자리가 '10'.
+
+    예: 20260916**10**0012 (효력발생안내, 정정신고서제출요구 등). 원문이 없어 다운로드 실패.
+    메타는 raw_sources 에 남기되 **정본 후보에서 제외**.
+    """
+    return len(rcept_no) >= 10 and rcept_no[8:10] == "10"
 
 
 def is_ipo_candidate(disclosure: dict) -> bool:
@@ -195,13 +205,19 @@ def choose_core_disclosure(disclosures: list[dict]) -> tuple[Optional[dict], lis
             continue
         classified.append((d, t))
 
-    # 발행조건확정 우선 (가장 최근)
-    finals = [c for c in classified if is_final_release(c[0].get("report_nm", ""))]
+    # 지시 #28: 금감원 공지 접수번호(9~10번째 '10')는 원문이 없어 다운로드 실패 → 정본 후보에서 제외
+    def _is_company_doc(d: dict) -> bool:
+        return not _is_fss_notice_rcept_no(d.get("rcept_no", ""))
+
+    # 발행조건확정 우선 (가장 최근) — 금감원 공지는 제외
+    finals = [c for c in classified
+              if is_final_release(c[0].get("report_nm", "")) and _is_company_doc(c[0])]
     if finals:
         core = max(finals, key=lambda c: c[0].get("rcept_dt", ""))[0]
     else:
-        # 모든 지분증권 증권신고서(기재정정/정정제출요구/신규) 중 최신
-        regs = [c for c in classified if c[1] == "REGISTRATION_AMENDED"]
+        # 모든 지분증권 증권신고서(기재정정/정정제출요구/신규) 중 최신 — 금감원 공지는 제외
+        regs = [c for c in classified
+                if c[1] == "REGISTRATION_AMENDED" and _is_company_doc(c[0])]
         if regs:
             core = max(regs, key=lambda c: c[0].get("rcept_dt", ""))[0]
         else:
@@ -459,6 +475,14 @@ def process_corp(
                 raw_sources=raw_sources, row=row, parsed_warnings=parsed_warnings,
             )
 
+        # 지시 #28: 투자설명서로 수요예측 기간 보강.
+        # 발행조건확정에는 "수요예측 기간" 명시가 거의 없음 — 투자설명서(PROSPECTUS/PROSPECTUS_AMENDED)에 있음.
+        if row.get("demand_forecast_start") is None or row.get("demand_forecast_end") is None:
+            _supplement_from_prospectus(
+                corp_code=corp_code, corp_name=corp_name, core_rcept=rcept_no,
+                raw_sources=raw_sources, row=row, parsed_warnings=parsed_warnings,
+            )
+
     # 저장
     with connect() as conn:
         upsert_ipo(conn, **row)
@@ -487,7 +511,9 @@ def _supplement_from_issuance_report(
 
     발행조건확정에서 못 뽑은 값만 채운다. 실패는 경고로만 남기고 진행.
     """
-    issuance = [s for s in raw_sources if s.get("doc_type") == "ISSUANCE_REPORT"]
+    issuance = [s for s in raw_sources
+                if s.get("doc_type") == "ISSUANCE_REPORT"
+                and not _is_fss_notice_rcept_no(s["disclosure"].get("rcept_no", ""))]
     if not issuance:
         return
     # 가장 최근 실적보고서 선택
@@ -526,6 +552,71 @@ def _supplement_from_issuance_report(
     if changed:
         parsed_warnings.append(
             f"ISSUANCE_REPORT({issue_rcept}) 보강 적용 — {', '.join(changed)}"
+        )
+
+
+def _supplement_from_prospectus(
+    *,
+    corp_code: str,
+    corp_name: str,
+    core_rcept: str,
+    raw_sources: list[dict],
+    row: dict,
+    parsed_warnings: list[str],
+) -> None:
+    """지시 #28: 투자설명서(PROSPECTUS/PROSPECTUS_AMENDED)로 수요예측 기간 보강.
+
+    발행조건확정 공시는 "수요예측 기간" 명시가 거의 없고 투자설명서에 있다 — pm 실측(크리에이츠).
+    null 자리만 채운다. 공지 접수번호는 다운로드 대상에서 제외.
+    """
+    pros = [
+        s for s in raw_sources
+        if s.get("doc_type") in ("PROSPECTUS", "PROSPECTUS_AMENDED")
+        and not _is_fss_notice_rcept_no(s["disclosure"].get("rcept_no", ""))
+    ]
+    if not pros:
+        return
+    # 가장 최근 투자설명서 (PROSPECTUS_AMENDED 우선)
+    latest = max(
+        pros,
+        key=lambda s: (
+            1 if s.get("doc_type") == "PROSPECTUS_AMENDED" else 0,
+            s["disclosure"].get("rcept_dt", ""),
+        ),
+    )
+    pros_rcept = latest["disclosure"]["rcept_no"]
+    if pros_rcept == core_rcept:
+        return
+    try:
+        zip_bytes = get_document_zip_cached(pros_rcept)
+        xml_bytes = extract_single_xml(zip_bytes)
+    except Exception as e:
+        parsed_warnings.append(
+            f"PROSPECTUS({pros_rcept}) 보강 다운로드/압축해제 실패: {type(e).__name__}: {e}"
+        )
+        return
+    try:
+        pros_parsed = parse(
+            xml_bytes,
+            rcept_no=pros_rcept,
+            corp_name=corp_name,
+            rcept_dt=_dash_date(latest["disclosure"].get("rcept_dt", "")),
+        )
+    except Exception as e:
+        parsed_warnings.append(
+            f"PROSPECTUS({pros_rcept}) 보강 파싱 실패: {type(e).__name__}: {e}"
+        )
+        return
+    changed: list[str] = []
+    if row.get("demand_forecast_start") is None and pros_parsed.demand_forecast_start:
+        row["demand_forecast_start"] = pros_parsed.demand_forecast_start
+        changed.append(f"demand_forecast_start={pros_parsed.demand_forecast_start}")
+    if row.get("demand_forecast_end") is None and pros_parsed.demand_forecast_end:
+        row["demand_forecast_end"] = pros_parsed.demand_forecast_end
+        changed.append(f"demand_forecast_end={pros_parsed.demand_forecast_end}")
+    if changed:
+        parsed_warnings.append(
+            f"PROSPECTUS({pros_rcept}) 보강 적용 — {', '.join(changed)}"
         )
 
 

@@ -631,6 +631,86 @@ def test_price_confirm_date_prefers_parsed_explicit_over_fallback(client, monkey
     assert d["demand_forecast_end"] == "2026-10-14"
 
 
+def test_fss_notice_rcept_no_detection():
+    """지시 #28: 접수번호 9~10번째 '10' 이면 금감원 공지 — 다운로드/정본에서 제외."""
+    from app.collect import _is_fss_notice_rcept_no
+    assert _is_fss_notice_rcept_no("20260916100012") is True   # 공지
+    assert _is_fss_notice_rcept_no("20260921100009") is True
+    assert _is_fss_notice_rcept_no("20261012000308") is False  # 회사 신고서(디티에스)
+    assert _is_fss_notice_rcept_no("20261019000150") is False  # 크리에이츠 발행조건확정
+    assert _is_fss_notice_rcept_no("short") is False
+
+
+def test_fss_notice_excluded_from_core_and_download(client, monkeypatch, tmp_path):
+    """지시 #28: 금감원 공지 접수번호(100xxx)는 core 후보에서 제외되고 다운로드도 호출 안 됨."""
+    from app import collect as collect_mod, dart_client as _dc
+    monkeypatch.setattr(collect_mod, "CACHE_DIR", tmp_path / "cache")
+
+    # 회사 신고서 + 효력발생안내(공지, 분류 안 됨 또는 공지 접수번호)
+    company_doc = _disc("20260910000011", "증권신고서(지분증권)",
+                        "01555555", "인텔리빅스", rcept_dt="20260910")
+    # 공지(접수번호 9-10 '10')가 "증권신고서(지분증권)" 를 포함해 REGISTRATION_AMENDED 로 잘못 분류될 가능성
+    fss_notice = _disc("20260916100012", "효력발생안내 (지분증권) 증권신고서(지분증권)",
+                       "01555555", "인텔리빅스", rcept_dt="20260916")
+
+    monkeypatch.setattr(_dc, "list_disclosures",
+                        lambda **kw: _list_resp([company_doc, fss_notice]))
+
+    downloaded: list[str] = []
+    def fake_dl(*, rcept_no, timeout=20.0):
+        downloaded.append(rcept_no)
+        if rcept_no == "20260916100012":
+            raise AssertionError(f"공지 접수번호 다운로드 시도됨: {rcept_no}")
+        return _zip_bytes(_MIN_XML)
+    monkeypatch.setattr(_dc, "download_document_zip", fake_dl)
+
+    client.post("/api/collect")
+    s = _wait_done(client)
+    assert s["status"] == "SUCCEEDED"
+    # 회사 신고서 접수번호만 다운로드됨
+    assert "20260910000011" in downloaded
+    assert "20260916100012" not in downloaded
+
+
+def test_db_stale_only_corp_reprocessed(client, monkeypatch, tmp_path):
+    """지시 #28: 증분 조회에는 없지만 DB 에 있고 parser_version 이 낡은 종목은 전체 이력 조회 후 재처리."""
+    from app import collect as collect_mod, dart_client as _dc, store
+    monkeypatch.setattr(collect_mod, "CACHE_DIR", tmp_path / "cache")
+
+    # 1회차: 수집 → DB 저장 (parser_version=v9)
+    first = _disc("20260901000011", "[발행조건확정]증권신고서(지분증권)",
+                  "01333333", "다비오", rcept_dt="20260901")
+    monkeypatch.setattr(_dc, "list_disclosures", lambda **kw: _list_resp([first]))
+    monkeypatch.setattr(_dc, "download_document_zip",
+                        lambda *, rcept_no, timeout=20.0: _zip_bytes(_MIN_XML))
+    client.post("/api/collect")
+    _wait_done(client)
+
+    # 2회차: parser_version bump + **증분 조회에 다비오 공시 없음** (현재 활동 없음)
+    monkeypatch.setattr(collect_mod, "PARSER_VERSION", "forced-v99")
+
+    # 증분 조회는 다른 종목만 반환(다비오 공시 없음)
+    def fake_list(**kw):
+        if kw.get("corp_code") == "01333333":
+            # corp_code 지정 전체 이력 조회에만 다비오 데이터 제공
+            return _list_resp([first])
+        # 증분(C001)에는 아무 공시도 없음
+        return _list_resp([])
+    monkeypatch.setattr(_dc, "list_disclosures", fake_list)
+
+    import shutil
+    if (tmp_path / "cache").exists():
+        shutil.rmtree(tmp_path / "cache")
+
+    client.post("/api/collect")
+    s = _wait_done(client)
+    assert s["status"] == "SUCCEEDED"
+    # 증분 조회에 공시 없음 → 메인 for 루프는 다비오 안 보임.
+    # DB stale-only 재처리 루프가 돌아 updated_count ≥ 1
+    assert s["summary"]["updated_count"] >= 1
+    assert s["summary"]["failed_count"] == 0
+
+
 def test_correction_notice_marks_correction_davio_shape(client, monkeypatch, tmp_path):
     """지시 #17 (pm 수정): 다비오 형태 — [정정제출요구] 접두 신고서(회사 원 신고서) +
     "정정신고서제출요구( ... )" 공지 + [기재정정] 신고서(회사 재제출). 발행조건확정 없음.
