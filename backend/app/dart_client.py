@@ -73,6 +73,32 @@ def list_disclosures(
     return r.json()
 
 
+def get_estk_rs(
+    *,
+    corp_code: str,
+    bgn_de: str,
+    end_de: str,
+    timeout: float = _DEFAULT_TIMEOUT,
+) -> dict:
+    """OpenDART estkRs.json — 지분증권 증권신고서 주요정보.
+
+    응답 구조: {"status","message","group":[{"title":"모집매출총괄"|"인수인정보"|...,"list":[...]}]}
+    """
+    _throttle()
+    r = httpx.get(
+        f"{DART_API}/estkRs.json",
+        params={
+            "crtfc_key": _key(),
+            "corp_code": corp_code,
+            "bgn_de": bgn_de,
+            "end_de": end_de,
+        },
+        timeout=timeout,
+    )
+    r.raise_for_status()
+    return r.json()
+
+
 _ZIP_MAGIC = b"PK\x03\x04"
 
 

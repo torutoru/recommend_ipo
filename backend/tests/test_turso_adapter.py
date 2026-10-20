@@ -531,3 +531,44 @@ def test_token_not_leaked_in_error(monkeypatch):
     msg = str(exc.value)
     assert "SUPERSECRETTOKEN" not in msg
     assert "top-secret-prod" not in msg
+
+
+# ---------- 보강 #C: TursoConnection.transaction() ----------
+
+def test_transaction_buffers_writes_until_commit(fake_turso):
+    """지시 보강 #C: with conn.transaction() 안 execute 는 pending 버퍼에 쌓이고 context 종료 시 flush."""
+    from app.turso_adapter import connect_turso
+
+    with connect_turso() as c:
+        c.executescript("CREATE TABLE IF NOT EXISTS t (k TEXT PRIMARY KEY, v INTEGER);")
+        assert c._tx_pending is None
+        with c.transaction():
+            assert c._tx_pending == []
+            c.execute("INSERT INTO t (k, v) VALUES (?, ?)", ("a", 1))
+            assert len(c._tx_pending) == 1
+            c.execute("INSERT INTO t (k, v) VALUES (?, ?)", ("b", 2))
+            c.execute("INSERT INTO t (k, v) VALUES (?, ?)", ("c", 3))
+            assert len(c._tx_pending) == 3
+        # exit 시 BEGIN + 3 + COMMIT 가 한 pipeline 으로 전송됨 → pending 초기화
+        assert c._tx_pending is None
+        # 데이터는 실제로 들어가 있어야 함
+        row = c.execute("SELECT * FROM t WHERE k = ?", ("b",)).fetchone()
+        assert row is not None
+        assert row["v"] == 2
+
+
+def test_transaction_rollback_on_exception_sends_nothing(fake_turso):
+    """예외 시 BEGIN/COMMIT 전송 자체 안 함 → 테이블에 데이터 없음."""
+    from app.turso_adapter import connect_turso
+
+    with connect_turso() as c:
+        c.executescript("CREATE TABLE IF NOT EXISTS t (k TEXT PRIMARY KEY, v INTEGER);")
+        try:
+            with c.transaction():
+                c.execute("INSERT INTO t (k, v) VALUES (?, ?)", ("x", 10))
+                raise RuntimeError("force rollback")
+        except RuntimeError:
+            pass
+        # 롤백 성공 — 테이블에 x 없음
+        row = c.execute("SELECT * FROM t WHERE k = ?", ("x",)).fetchone()
+        assert row is None

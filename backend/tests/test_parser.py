@@ -559,6 +559,37 @@ def test_extract_tradable_ratio_paren_percent_requires_sang_jang_jik_hu():
 
 # ---------- 정확도 보강 #3: 엘리스그룹 확약 — "합 계" COLSPAN 분리 ----------
 
+# ---------- 보강 #D: estkRs group[].list 인수인정보 ----------
+
+def test_extract_underwriters_from_estk_rs_basic():
+    """group[].title='인수인정보' list → actnmn 추출 (대표/공동/인수 순, 중복 제거)."""
+    from app.collect import _extract_underwriters_from_estk_rs
+    resp = {
+        "status": "000",
+        "group": [
+            {"title": "모집매출총괄", "list": [{"stksen": "보통주"}]},
+            {"title": "인수인정보", "list": [
+                {"actsen": "인수", "actnmn": "하나증권"},
+                {"actsen": "대표", "actnmn": "신한투자증권"},
+                {"actsen": "공동", "actnmn": "미래에셋증권"},
+                {"actsen": "대표", "actnmn": "신한투자증권"},   # 중복 제거
+            ]},
+        ],
+    }
+    assert _extract_underwriters_from_estk_rs(resp) == [
+        "신한투자증권", "미래에셋증권", "하나증권",
+    ]
+
+
+def test_extract_underwriters_from_estk_rs_empty_when_no_group():
+    from app.collect import _extract_underwriters_from_estk_rs
+    assert _extract_underwriters_from_estk_rs({"status": "013"}) == []
+    assert _extract_underwriters_from_estk_rs({"group": []}) == []
+    assert _extract_underwriters_from_estk_rs(
+        {"group": [{"title": "모집매출총괄", "list": [{}]}]}
+    ) == []
+
+
 def test_extract_lockup_colspan_split_han_gye():
     """엘리스그룹 포맷 — "합 계" 가 COLSPAN 처리로 "합" + "계" 두 셀로 분리되어 cells[0]="계" 로 들어옴.
     "계" 라벨도 수용해 집계 성공해야 한다.

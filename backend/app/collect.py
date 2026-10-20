@@ -62,7 +62,8 @@ DART_URL = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo="
 #   v14 — 지시 #30 (CORRECTION 해제: 효력발생안내 또는 투자설명서가 요구일 이후 있으면 정상 판정)
 #   v15 — 지시 #32 (correction 메타 COALESCE 예외 — 해제 조건 성립 시 null 로 교체)
 #   v16 — 정확도 보강 #정확도-배치3 (엘리스그룹 확약 — 라벨 "합/계" COLSPAN 분리 수용)
-PARSER_VERSION = "v16"
+#   v17 — 보강 묶음 (D: estkRs 교차검증 + C: Turso transaction 묶음)
+PARSER_VERSION = "v17"
 
 
 # ---------- 분류 ----------
@@ -382,9 +383,8 @@ def process_corp(
             else:
                 # 신규 종목인데 core 가 없음 — PENDING 메타만 저장(지표는 전부 null)
                 parsed_warnings.append("정본 공시(발행조건확정/증권신고서) 없음 — PENDING 유지")
-                upsert_ipo(conn, **row)
-                replace_sources(conn, corp_code, sources_payload)
-                replace_warnings(conn, corp_code, parsed_warnings)
+                _save_atomic(conn, corp_code=corp_code, row=row,
+                             sources_payload=sources_payload, parsed_warnings=parsed_warnings)
                 return {
                     "corp_code": corp_code,
                     "corp_name": corp_name,
@@ -478,10 +478,34 @@ def process_corp(
             demand_forecast_start=parsed.demand_forecast_start,
             demand_forecast_end=parsed.demand_forecast_end,
         )
-        # v1.2 (지시 #21): underwriters 를 JSON 문자열로
-        if parsed.underwriters:
+        # v1.2 (지시 #21) + 보강 (estkRs 교차검증): 서술형 추출 결과 + estkRs group[].list "인수인정보" merge.
+        # 서술형이 못 잡는 공동주관사·인수회사가 estkRs 에 있으면 보강(이름만, 수량/금액 사용 금지).
+        combined = list(parsed.underwriters)
+        estk_names: list[str] = []
+        try:
+            core_dt_raw = core.get("rcept_dt", "")
+            if len(core_dt_raw) >= 4:
+                yr = int(core_dt_raw[:4])
+                bgn_de = f"{yr-1:04d}0101"
+                end_de = f"{yr+1:04d}1231"
+                estk_resp = dart_client.get_estk_rs(corp_code=corp_code, bgn_de=bgn_de, end_de=end_de)
+                estk_names = _extract_underwriters_from_estk_rs(estk_resp)
+        except Exception as e:
+            parsed_warnings.append(f"estkRs 교차검증 호출 실패: {type(e).__name__}: {e}")
+        if estk_names:
+            seen = set(combined)
+            for name in estk_names:
+                if name not in seen:
+                    seen.add(name)
+                    combined.append(name)
+            if combined != parsed.underwriters:
+                added = [n for n in estk_names if n not in parsed.underwriters]
+                parsed_warnings.append(
+                    f"주관사 estkRs 보강: 서술형={parsed.underwriters}, estkRs={estk_names}, 추가={added}"
+                )
+        if combined:
             import json as _json
-            row["underwriters_json"] = _json.dumps(parsed.underwriters, ensure_ascii=False)
+            row["underwriters_json"] = _json.dumps(combined, ensure_ascii=False)
         # 지시 #20: price_confirm_date 는 발행조건확정 공시 접수일로 fallback.
         # 명세: "확정공고일 = 이날 [발행조건확정] 공시로 기관 데이터 공개" → core 가 [발행조건확정] 이면 접수일 == 공고일.
         if row["price_confirm_date"] is None and is_final_release(core.get("report_nm", "")):
@@ -510,11 +534,10 @@ def process_corp(
                 raw_sources=raw_sources, row=row, parsed_warnings=parsed_warnings,
             )
 
-    # 저장
+    # 저장 (지시 보강 #C: Turso 는 transaction()으로 한 pipeline 묶음, SQLite 는 context manager 가 자연 원자)
     with connect() as conn:
-        upsert_ipo(conn, **row)
-        replace_sources(conn, corp_code, sources_payload)
-        replace_warnings(conn, corp_code, parsed_warnings)
+        _save_atomic(conn, corp_code=corp_code, row=row,
+                     sources_payload=sources_payload, parsed_warnings=parsed_warnings)
 
     return {
         "corp_code": corp_code,
@@ -580,6 +603,56 @@ def _supplement_from_issuance_report(
         parsed_warnings.append(
             f"ISSUANCE_REPORT({issue_rcept}) 보강 적용 — {', '.join(changed)}"
         )
+
+
+def _extract_underwriters_from_estk_rs(response: dict) -> list[str]:
+    """지시 (보조): estkRs 응답의 group[]."인수인정보" list → 이름 리스트 (대표/공동/인수 순 정렬).
+
+    actsen: 역할(대표/공동/인수), actnmn: 이름. 수량/금액(udtcnt, udtamt)은 쓰지 않음(pm 지시).
+    """
+    role_order = {"대표": 0, "공동대표": 1, "공동": 2, "인수": 3}
+    pairs: list[tuple[int, str]] = []
+    for g in response.get("group", []) or []:
+        if g.get("title") == "인수인정보":
+            for it in g.get("list", []) or []:
+                name = (it.get("actnmn") or "").strip()
+                if not name:
+                    continue
+                role = (it.get("actsen") or "").strip()
+                pairs.append((role_order.get(role, 9), name))
+            break
+    pairs.sort(key=lambda t: t[0])
+    seen: set[str] = set()
+    out: list[str] = []
+    for _, n in pairs:
+        if n not in seen:
+            seen.add(n)
+            out.append(n)
+    return out
+
+
+def _save_atomic(
+    conn,
+    *,
+    corp_code: str,
+    row: dict,
+    sources_payload: list[dict],
+    parsed_warnings: list[str],
+) -> None:
+    """지시 보강 #C: 종목 1건 저장(ipo + sources + warnings)을 원자적으로 묶는다.
+
+    - Turso HTTP: `conn.transaction()` 가 BEGIN + 세 그룹 쿼리 + COMMIT 를 한 pipeline 으로 전송
+    - SQLite 로컬: `connect()` context manager 가 종료 시 commit, 중간 예외 시 rollback → 이미 자연 원자
+    """
+    if hasattr(conn, "transaction"):
+        with conn.transaction():
+            upsert_ipo(conn, **row)
+            replace_sources(conn, corp_code, sources_payload)
+            replace_warnings(conn, corp_code, parsed_warnings)
+    else:
+        upsert_ipo(conn, **row)
+        replace_sources(conn, corp_code, sources_payload)
+        replace_warnings(conn, corp_code, parsed_warnings)
 
 
 def _supplement_from_prospectus(

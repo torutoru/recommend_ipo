@@ -215,18 +215,29 @@ def _parse_lastrowid(result: dict) -> Optional[int]:
 
 
 class TursoConnection:
-    """HTTP 기반 커넥션 — context 안에서 사용. autocommit 전제."""
+    """HTTP 기반 커넥션 — context 안에서 사용. autocommit 전제.
+
+    트랜잭션(지시 보강 #정확도-C):
+      ``with conn.transaction(): ...`` 안에서 호출되는 쓰기 execute 는 **버퍼링** 되고,
+      context 종료 시 ``BEGIN + 쿼리들 + COMMIT`` 를 **한 pipeline** 으로 전송 — Hrana 원자성 보장.
+      예외 발생 시 아무 것도 전송하지 않음(기존 데이터 유지).
+      트랜잭션 내 SELECT 는 지원하지 않음(쓰기 전용 묶음).
+    """
 
     def __init__(self, client: httpx.Client, base_url: str, token: str):
         self._client = client
         self._base_url = base_url
         self._token = token
+        self._tx_pending: Optional[list[dict]] = None
 
     # ---- 공개 API ----
     def execute(self, sql: str, params: Optional[tuple | list] = None) -> _CursorAdapter:
         stmt = {"sql": sql}
         if params is not None:
             stmt["args"] = [_to_arg(p) for p in params]
+        if self._tx_pending is not None:
+            self._tx_pending.append(stmt)
+            return _CursorAdapter({})
         results = _post_pipeline(self._client, self._base_url, self._token, [stmt])
         return _CursorAdapter(results[0] if results else {})
 
@@ -234,9 +245,30 @@ class TursoConnection:
         stmts = [{"sql": sql, "args": [_to_arg(p) for p in params]} for params in seq_of_params]
         if not stmts:
             return _CursorAdapter({})
+        if self._tx_pending is not None:
+            self._tx_pending.extend(stmts)
+            return _CursorAdapter({})
         results = _post_pipeline(self._client, self._base_url, self._token, stmts)
-        # 마지막 결과만 반환 (lastrowid 는 마지막 insert 기준)
         return _CursorAdapter(results[-1])
+
+    @contextmanager
+    def transaction(self) -> Iterator["TursoConnection"]:
+        """지시 보강: BEGIN + 쓰기 쿼리들 + COMMIT 를 한 pipeline 으로.
+        예외 시 아무것도 전송하지 않음(ROLLBACK 불필요 — 전송 자체 안 함)."""
+        if self._tx_pending is not None:
+            raise RuntimeError("TursoConnection.transaction 중첩 미지원")
+        self._tx_pending = []
+        try:
+            yield self
+        except Exception:
+            self._tx_pending = None
+            raise
+        else:
+            stmts = self._tx_pending
+            self._tx_pending = None
+            if stmts:
+                all_stmts = [{"sql": "BEGIN"}] + stmts + [{"sql": "COMMIT"}]
+                _post_pipeline(self._client, self._base_url, self._token, all_stmts)
 
     def executescript(self, script: str) -> None:
         stmts = [{"sql": s} for s in _split_sql(script) if s]
