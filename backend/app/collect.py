@@ -60,7 +60,8 @@ DART_URL = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo="
 #   v12 — 정확도 보강 배치1 (수요예측 요일 괄호·"일시" 라벨 + 신주/구주 라벨 변형)
 #   v13 — 정확도 보강 #1 (엠에스바이오 유통 — 괄호 % 서술 + 투자설명서 tradable_ratio 보강)
 #   v14 — 지시 #30 (CORRECTION 해제: 효력발생안내 또는 투자설명서가 요구일 이후 있으면 정상 판정)
-PARSER_VERSION = "v14"
+#   v15 — 지시 #32 (correction 메타 COALESCE 예외 — 해제 조건 성립 시 null 로 교체)
+PARSER_VERSION = "v15"
 
 
 # ---------- 분류 ----------

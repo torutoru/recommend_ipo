@@ -186,6 +186,8 @@ export function CalendarPage() {
                 const visible = sorted.slice(0, MAX_CHIPS_PER_CELL)
                 // +N 더보기: CORRECTION 숨김 포함 전체 이벤트 수 기준.
                 const overflow = events.length - visible.length
+                const hasEvents = events.length > 0
+                const isSelected = selectedDay === cell.ymd
                 return (
                   <div
                     key={cell.ymd}
@@ -193,13 +195,22 @@ export function CalendarPage() {
                       'cal-cell',
                       cell.isCurrentMonth ? '' : 'off-month',
                       cell.isToday ? 'today' : '',
-                      selectedDay === cell.ymd ? 'selected' : '',
+                      isSelected ? 'selected' : '',
                       cell.dayOfWeek === 0 ? 'is-sun' : '',
                       cell.dayOfWeek === 6 ? 'is-sat' : '',
+                      hasEvents ? 'has-events' : '',
                     ].filter(Boolean).join(' ')}
-                    role="gridcell"
-                    tabIndex={events.length > 0 ? 0 : -1}
-                    onClick={() => events.length > 0 ? setSelectedDay(cell.ymd) : undefined}
+                    role={hasEvents ? 'button' : 'gridcell'}
+                    aria-pressed={hasEvents ? isSelected : undefined}
+                    aria-label={hasEvents ? `${cell.ymd} 일정 ${events.length}건` : undefined}
+                    tabIndex={hasEvents ? 0 : -1}
+                    onClick={() => hasEvents ? setSelectedDay(cell.ymd) : undefined}
+                    onKeyDown={e => {
+                      if (hasEvents && (e.key === 'Enter' || e.key === ' ')) {
+                        e.preventDefault()
+                        setSelectedDay(cell.ymd)
+                      }
+                    }}
                   >
                     <div className="cal-date">{cell.date.getDate()}</div>
                     <div className="cal-chips">
@@ -207,12 +218,7 @@ export function CalendarPage() {
                         <EventChip key={`${ev.item.id}-${ev.type}-${i}`} ev={ev} />
                       ))}
                       {overflow > 0 && (
-                        <button
-                          className="cal-more"
-                          onClick={e => { e.stopPropagation(); setSelectedDay(cell.ymd) }}
-                        >
-                          +{overflow} 더보기
-                        </button>
+                        <span className="cal-more">+{overflow} 더보기</span>
                       )}
                     </div>
                   </div>
@@ -264,18 +270,18 @@ function EventChip({ ev }: { ev: CalEvent }) {
   const title = warn
     ? `${ev.item.corp_name} — ${label} (${VERDICT_TEXT[key]}) · 일정 변경 가능`
     : `${ev.item.corp_name} — ${label} (${VERDICT_TEXT[key]})`
+  // v1.6 (#20): 칩 자체는 non-interactive span. 클릭·포커스는 셀로 위임.
   return (
-    <Link
-      to={`/ipos/${ev.item.id}`}
+    <span
       className={`cal-chip ${VERDICT_CLS[key]} ${ev.type === 'LISTING' ? 'chip-listing' : ''}`}
       title={title}
-      onClick={e => e.stopPropagation()}
+      aria-hidden="true"
     >
       {warn && <span className="chip-warn" aria-label="일정 변경 가능">⚠</span>}
       <span className="chip-type">{label}</span>
       <span className="chip-grade">{VERDICT_TEXT[key]}</span>
       <span className="chip-name">{ev.item.corp_name}</span>
-    </Link>
+    </span>
   )
 }
 

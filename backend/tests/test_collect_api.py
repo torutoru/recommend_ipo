@@ -992,6 +992,51 @@ def test_30_correction_kept_when_no_amendment_ucast(client, monkeypatch, tmp_pat
     assert d["verdict"]["correction"]["amended_at"] is None
 
 
+def test_32_correction_meta_coalesce_exception_clears_on_release(client, monkeypatch, tmp_path):
+    """지시 #32: 1회차 CORRECTION 저장 → 2회차에 효력발생안내 공시 추가 → correction 메타는 **null 로 교체**(COALESCE 예외).
+    pm 실측 래블업 재현: v14 에서 해제 조건 성립해도 과거 저장값이 남아 상태가 안 바뀌던 버그 수정 검증.
+    """
+    from app import collect as collect_mod, dart_client as _dc
+    monkeypatch.setattr(collect_mod, "CACHE_DIR", tmp_path / "cache")
+
+    bracket = _disc("20260825000318", "[정정제출요구]증권신고서(지분증권)",
+                    "02233333", "래블업", rcept_dt="20260825")
+    notice_req = _disc("20260908100002",
+                       "정정신고서제출요구( 2026.08.25. 제출 증권신고서(지분증권) )",
+                       "02233333", "래블업", rcept_dt="20260908")
+
+    # 1회차 — 효력발생안내/투자설명서 없음 → CORRECTION 저장
+    monkeypatch.setattr(_dc, "list_disclosures",
+                        lambda **kw: _list_resp([bracket, notice_req]))
+    monkeypatch.setattr(_dc, "download_document_zip",
+                        lambda *, rcept_no, timeout=20.0: _zip_bytes(_MIN_XML))
+    client.post("/api/collect")
+    _wait_done(client)
+    first = client.get("/api/ipos/02233333").json()
+    assert first["verdict"]["status"] == "CORRECTION"
+    assert first["verdict"]["correction"]["requested_at"] == "2026-09-08"
+
+    # 2회차 — PARSER_VERSION bump + 효력발생안내 + 투자설명서 추가 (요구일 이후)
+    monkeypatch.setattr(collect_mod, "PARSER_VERSION", "forced-v99")
+    effect = _disc("20260921100012",
+                   "효력발생안내( 2026.9.21. 제출 증권신고서(지분증권) )",
+                   "02233333", "래블업", rcept_dt="20261019")
+    prospectus = _disc("20261019000009", "투자설명서",
+                       "02233333", "래블업", rcept_dt="20261019")
+    monkeypatch.setattr(_dc, "list_disclosures",
+                        lambda **kw: _list_resp([bracket, notice_req, effect, prospectus]))
+    import shutil
+    if (tmp_path / "cache").exists():
+        shutil.rmtree(tmp_path / "cache")
+
+    client.post("/api/collect")
+    _wait_done(client)
+    second = client.get("/api/ipos/02233333").json()
+    # correction 해제 — null 로 교체
+    assert second["verdict"]["status"] != "CORRECTION"
+    assert second["verdict"]["correction"] is None
+
+
 def test_correction_cleared_when_final_release_comes_after(client, monkeypatch, tmp_path):
     """지시 #17: 정정요구 이후 발행조건확정이 들어오면 CORRECTION 아님(정상 PASS/REJECT 평가)."""
     from app import collect as collect_mod, dart_client as _dc

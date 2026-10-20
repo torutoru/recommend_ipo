@@ -226,8 +226,10 @@ def upsert_ipo(
             price_confirm_date    = COALESCE(excluded.price_confirm_date, ipos.price_confirm_date),
             demand_forecast_start = COALESCE(excluded.demand_forecast_start, ipos.demand_forecast_start),
             demand_forecast_end   = COALESCE(excluded.demand_forecast_end, ipos.demand_forecast_end),
-            correction_requested_at = COALESCE(excluded.correction_requested_at, ipos.correction_requested_at),
-            correction_amended_at   = COALESCE(excluded.correction_amended_at,   ipos.correction_amended_at),
+            -- 지시 #32: correction 메타는 **매 수집마다 재계산** 되는 파생값 → excluded 로 교체(null 포함).
+            -- COALESCE 보호를 두면 CORRECTION 해제 조건이 성립해도 과거 값이 남아 상태가 안 바뀜.
+            correction_requested_at = excluded.correction_requested_at,
+            correction_amended_at   = excluded.correction_amended_at,
             underwriters_json       = COALESCE(excluded.underwriters_json, ipos.underwriters_json),
             parser_version=excluded.parser_version,
             updated_at=excluded.updated_at
