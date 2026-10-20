@@ -557,6 +557,29 @@ def test_extract_tradable_ratio_paren_percent_requires_sang_jang_jik_hu():
     assert _RE_TRADABLE_RATIO_NARRATIVE_PAREN.search(text) is None
 
 
+# ---------- 정확도 보강 #3: 엘리스그룹 확약 — "합 계" COLSPAN 분리 ----------
+
+def test_extract_lockup_colspan_split_han_gye():
+    """엘리스그룹 포맷 — "합 계" 가 COLSPAN 처리로 "합" + "계" 두 셀로 분리되어 cells[0]="계" 로 들어옴.
+    "계" 라벨도 수용해 집계 성공해야 한다.
+    """
+    from app.parser import extract_lockup
+    xml = (
+        '<DOC>'
+        '<SPAN>(다) 의무보유확약기간별 수요예측 참여내역</SPAN>'
+        '<TABLE>'
+        '<TR><TD>미확약</TD><TD>82</TD><TD>44,209,300</TD></TR>'
+        '<TR><TD>합</TD><TD>계</TD><TD>87</TD><TD>48,410,500</TD></TR>'
+        '</TABLE>'
+        '<SPAN USERMARK="0X0000FF">(라) 다음 섹션</SPAN>'
+        '</DOC>'
+    )
+    ratio, basis = extract_lockup(xml)
+    assert basis == "applied"
+    # locked = 48,410,500 - 44,209,300 = 4,201,200 → 8.68%
+    assert ratio == round((48_410_500 - 44_209_300) / 48_410_500 * 100, 2)
+
+
 # ---------------- 지시 #21: 주관사·인수회사 추출 ----------------
 
 def test_extract_underwriters_basic():

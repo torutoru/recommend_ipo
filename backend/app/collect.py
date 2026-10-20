@@ -61,7 +61,8 @@ DART_URL = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo="
 #   v13 — 정확도 보강 #1 (엠에스바이오 유통 — 괄호 % 서술 + 투자설명서 tradable_ratio 보강)
 #   v14 — 지시 #30 (CORRECTION 해제: 효력발생안내 또는 투자설명서가 요구일 이후 있으면 정상 판정)
 #   v15 — 지시 #32 (correction 메타 COALESCE 예외 — 해제 조건 성립 시 null 로 교체)
-PARSER_VERSION = "v15"
+#   v16 — 정확도 보강 #정확도-배치3 (엘리스그룹 확약 — 라벨 "합/계" COLSPAN 분리 수용)
+PARSER_VERSION = "v16"
 
 
 # ---------- 분류 ----------

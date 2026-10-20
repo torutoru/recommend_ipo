@@ -270,12 +270,21 @@ def _sum_large_cells_in_row(section: str, label: str, min_value: int = 1_000_000
 
 
 def extract_lockup(xml: str) -> tuple[Optional[float], Optional[Literal["allocated", "applied"]]]:
-    """의무보유확약 비율(%) + 기준(신청/배정)."""
+    """의무보유확약 비율(%) + 기준(신청/배정).
+
+    라벨 변형 수용 (실측 — 지시 (정확도 보강 #3)):
+    - "합계" / "합 계" (디티에스·티앤이·크리에이츠·엠에스바이오)
+    - **"합"** 한 글자 (엘리스그룹)
+    """
     m = _RE_LOCKUP_SECTION.search(xml)
     if not m:
         return None, None
     section = m.group(1)
+    # 엘리스 등: COLSPAN 처리로 "합 계" 가 두 셀 "합" + "계" 로 분리되어 cells[0]="계" 로 들어옴
     total = _sum_large_cells_in_row(section, "합계")
+    for alt in ("합", "계"):
+        if total is None:
+            total = _sum_large_cells_in_row(section, alt)
     unlocked = _sum_large_cells_in_row(section, "미확약")
     if total is None or unlocked is None or total <= 0:
         return None, None
