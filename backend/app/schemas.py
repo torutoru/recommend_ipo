@@ -173,6 +173,8 @@ class CollectSummary(BaseModel):
     unchanged_count: int = 0
     failed_count: int = 0
     withdrawn_count: int = 0
+    # 지시 #36: 어느 종목이 unchanged 로 분류됐는지 가시화 → 다음 라운드 검증 쉬움
+    unchanged_corps: list[str] = Field(default_factory=list)
 
 
 class CollectFailure(BaseModel):

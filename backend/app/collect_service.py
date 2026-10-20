@@ -224,6 +224,7 @@ def _run() -> None:
                 # 완전히 새로운 공시가 없고 파서 버전도 최신 — unchanged
                 if is_existing:
                     summary.unchanged_count += 1
+                    summary.unchanged_corps.append(f"{corp_name}({corp_code})")
                 continue
             # is_stale 이면 new_items 가 비어도 process_corp 로 재파싱 진행 (버전 bump 시 자동 재적용)
 
@@ -273,6 +274,7 @@ def _run() -> None:
             elif r.get("status") == "preserved":
                 # 지시 #24: core 없음(ISSUANCE_REPORT 만) + 기존 레코드 있음 → 지표 보존 (unchanged 로 계수)
                 summary.unchanged_count += 1
+                summary.unchanged_corps.append(f"{corp_name}({corp_code}) preserved")
             elif is_new:
                 summary.new_count += 1
             else:
@@ -310,6 +312,7 @@ def _run() -> None:
             if not filtered_full:
                 # 조회됐으나 분류 가능한 공시가 없음 — unchanged 로 계수
                 summary.unchanged_count += 1
+                summary.unchanged_corps.append(f"{corp_name}({corp_code}) stale-only:no-filtered")
                 continue
             items_for_process = sorted(filtered_full, key=lambda d: d.get("rcept_dt", ""))
             if items_for_process:
@@ -331,6 +334,7 @@ def _run() -> None:
                 _add_failure(corp_code, corp_name, r.get("reason") or r["status"])
             elif r.get("status") == "preserved":
                 summary.unchanged_count += 1
+                summary.unchanged_corps.append(f"{corp_name}({corp_code}) stale-only:preserved")
             else:
                 summary.updated_count += 1
         except Exception as e:
