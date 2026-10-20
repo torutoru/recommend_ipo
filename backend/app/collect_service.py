@@ -228,11 +228,12 @@ def _run() -> None:
                         f"종목 전체 이력 조회 실패 — {_sanitize_error(fe)} / 증분 범위로 fallback",
                     )
                 if full_items:
-                    # IPO 후보 필터 통과한 공시 + 금감원 "정정신고서제출요구" 공지(지시 #17 수정) 포함
+                    # IPO 후보 필터 통과한 공시 + 금감원 공지(CORRECTION_REQUEST/EFFECTIVENESS_NOTICE) 포함
                     filtered_full = [
                         it for it in full_items
                         if collect_mod.is_ipo_candidate(it)
-                        or collect_mod.classify_report(it.get("report_nm", "")) == "CORRECTION_REQUEST"
+                        or collect_mod.classify_report(it.get("report_nm", ""))
+                            in ("CORRECTION_REQUEST", "EFFECTIVENESS_NOTICE")
                     ]
                     if filtered_full:
                         items_for_process = sorted(
@@ -288,7 +289,8 @@ def _run() -> None:
             filtered_full = [
                 it for it in full_items
                 if collect_mod.is_ipo_candidate(it)
-                or collect_mod.classify_report(it.get("report_nm", "")) == "CORRECTION_REQUEST"
+                or collect_mod.classify_report(it.get("report_nm", ""))
+                    in ("CORRECTION_REQUEST", "EFFECTIVENESS_NOTICE")
             ]
             if not filtered_full:
                 # 조회됐으나 분류 가능한 공시가 없음 — unchanged 로 계수

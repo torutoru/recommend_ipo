@@ -26,6 +26,7 @@ DocType = Literal[
     "REGISTRATION_AMENDED",
     "ISSUANCE_REPORT",
     "CORRECTION_REQUEST",   # v0.8 (지시 #17) — 금감원 "정정신고서 제출요구" 공시
+    "EFFECTIVENESS_NOTICE", # 지시 #30 — 금감원 "효력발생안내" 공시 (CORRECTION 해제 트리거)
 ]
 CompetitionRateType = Literal["simple", "weighted"]
 LockupBasis = Literal["allocated", "applied"]

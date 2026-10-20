@@ -302,6 +302,12 @@ _RE_TRADABLE_RATIO_NARRATIVE_INVERTED = re.compile(
     r"상장\s*직후[^%<]{0,120}?유통가능[^%<]{0,120}?([\d.]+)\s*%"
 )
 
+# 정확도 보강 (#1): 엠에스바이오 형식 — "주식수 N주(N.NN%)는 상장 직후 시장에서 유통가능한 물량입니다"
+# 괄호 안에 %가 **먼저** 들어오고 그 뒤에 "상장 직후 ... 유통가능" 서술이 오는 포맷.
+_RE_TRADABLE_RATIO_NARRATIVE_PAREN = re.compile(
+    r"[\d,]+\s*주\s*\(\s*([\d.]+)\s*%\s*\)[^%<]{0,60}상장\s*직후[^%<]{0,40}유통가능"
+)
+
 # fallback: 테이블 "유통가능물량(A-B)" 라벨 셀 뒤 300자 이내에서 "N.NN%" 매치 (첫 매치).
 # 중간에 한글 라벨(최대주주/벤처금융 등)이 끼면 다른 섹션이므로 거부.
 _RE_TRADABLE_RATIO_TABLE = re.compile(
@@ -310,11 +316,14 @@ _RE_TRADABLE_RATIO_TABLE = re.compile(
 
 
 def extract_tradable_ratio(xml: str) -> Optional[float]:
-    """상장일 유통가능 비율(%). 서술형(2종) → 테이블 fallback 순."""
+    """상장일 유통가능 비율(%). 서술형(3종) → 테이블 fallback 순."""
     text = _strip_tags(xml)
     m = _RE_TRADABLE_RATIO_NARRATIVE.search(text)
     if m:
         return _to_float(m.group(1))
+    m_paren = _RE_TRADABLE_RATIO_NARRATIVE_PAREN.search(text)
+    if m_paren:
+        return _to_float(m_paren.group(1))
     m_inv = _RE_TRADABLE_RATIO_NARRATIVE_INVERTED.search(text)
     if m_inv:
         return _to_float(m_inv.group(1))

@@ -470,6 +470,53 @@ def test_core_none_with_existing_preserves_metrics(client, monkeypatch, tmp_path
     assert "ISSUANCE_REPORT" in source_types
 
 
+def test_prospectus_supplements_tradable_ratio_msbio_style(client, monkeypatch, tmp_path):
+    """정확도 보강 #1: 발행조건확정에 유통 서술 없고 투자설명서에만 있으면 (엠에스바이오 사례)
+    _supplement_from_prospectus 가 tradable_ratio 를 보완."""
+    from app import collect as collect_mod, dart_client as _dc
+    monkeypatch.setattr(collect_mod, "CACHE_DIR", tmp_path / "cache")
+
+    final_disc = _disc("20261007000327", "[발행조건확정]증권신고서(지분증권)",
+                       "01749559", "엠에스바이오", rcept_dt="20261007")
+    pros_disc = _disc("20261007000328", "[기재정정]투자설명서",
+                      "01749559", "엠에스바이오", rcept_dt="20261007")
+
+    # 발행조건확정: 지표는 있지만 유통 서술 없음
+    final_xml = """<?xml version="1.0" encoding="utf-8"?>
+<DOC>
+<P>공모희망가액 범위(6,800원 ~ 7,800원)</P>
+<P>확정공모가액 7,800원</P>
+<P>본 공시 접수일 2026-10-07</P>
+<P>청약기간: 2026년 10월 13일 ~ 2026년 10월 14일</P>
+<P>모집(매출)주식수 4,000,000주</P>
+<TR><TD>경쟁률</TD><TD>1</TD><TD>2</TD><TD>3</TD><TD>4</TD><TD>5</TD><TD>6</TD><TD>7</TD><TD>8</TD><TD>9</TD><TD>1096.56</TD></TR>
+<TR><TD>수량</TD><TD>1</TD><TD>2</TD><TD>3</TD><TD>4</TD><TD>5</TD><TD>6</TD><TD>7</TD><TD>8</TD><TD>9</TD><TD>500000</TD></TR>
+</DOC>
+"""
+    # 투자설명서: "주식수 6,347,310주(23.33%)는 상장 직후 ..." 서술
+    pros_xml = """<?xml version="1.0" encoding="utf-8"?>
+<DOC>
+<P>상기 의무보유 수량을 제외한 주식수 6,347,310주(23.33%)는 상장 직후 시장에서 유통가능한 물량입니다.</P>
+</DOC>
+"""
+
+    monkeypatch.setattr(_dc, "list_disclosures", lambda **kw: _list_resp([final_disc, pros_disc]))
+
+    def fake_dl(*, rcept_no, timeout=20.0):
+        if rcept_no == "20261007000327": return _zip_bytes(final_xml)
+        if rcept_no == "20261007000328": return _zip_bytes(pros_xml)
+        raise AssertionError(f"예상치 못한 다운로드: {rcept_no}")
+    monkeypatch.setattr(_dc, "download_document_zip", fake_dl)
+
+    client.post("/api/collect")
+    s = _wait_done(client)
+    assert s["status"] == "SUCCEEDED"
+    d = client.get("/api/ipos/01749559").json()
+    assert d["indicators"]["tradable_ratio"] == 23.33
+    # 발행조건확정의 다른 지표(경쟁률)는 유지
+    assert d["indicators"]["competition_rate"] == 1096.56
+
+
 def test_issuance_report_supplements_listing_date_and_market(client, monkeypatch, tmp_path):
     """지시 #25: 발행조건확정에 listing_date/market 가 없고 ISSUANCE_REPORT 가 함께 있으면
     실적보고서를 추가 다운로드·파싱해 두 값을 보강(기존 지표는 유지)."""
@@ -857,6 +904,92 @@ def test_correction_fallback_to_bracket_prefix_when_no_notice(client, monkeypatc
     assert d["verdict"]["correction"]["amended_at"] is None
     # 접두 신고서는 REGISTRATION_AMENDED 로 정본 후보 유지
     assert "REGISTRATION_AMENDED" in {s["doc_type"] for s in d["sources"]}
+
+
+def test_30_correction_cleared_by_effectiveness_notice_labplup(client, monkeypatch, tmp_path):
+    """지시 #30: 래블업 형태 — 요구 09-08, 기재정정 09-21, **효력발생안내 10-19** + 투자설명서 10-19
+    → CORRECTION **해제** (정상 판정으로 전환)."""
+    from app import collect as collect_mod, dart_client as _dc
+    monkeypatch.setattr(collect_mod, "CACHE_DIR", tmp_path / "cache")
+
+    original = _disc("20260901000011", "[정정제출요구]증권신고서(지분증권)",
+                     "01956751", "래블업", rcept_dt="20260901")
+    notice_req = _disc("20260908100022",
+                       "정정신고서제출요구( 2026.09.01. 제출 증권신고서(지분증권) )",
+                       "01956751", "래블업", rcept_dt="20260908")
+    amended = _disc("20260921000033", "[기재정정]증권신고서(지분증권)",
+                    "01956751", "래블업", rcept_dt="20260921")
+    effect = _disc("20260921100012",
+                   "효력발생안내( 2026.9.21. 제출 증권신고서(지분증권) )",
+                   "01956751", "래블업", rcept_dt="20261019")
+    prospectus = _disc("20261019000055", "투자설명서",
+                       "01956751", "래블업", rcept_dt="20261019")
+
+    monkeypatch.setattr(_dc, "list_disclosures",
+                        lambda **kw: _list_resp([original, notice_req, amended, effect, prospectus]))
+    monkeypatch.setattr(_dc, "download_document_zip",
+                        lambda *, rcept_no, timeout=20.0: _zip_bytes(_MIN_XML))
+
+    client.post("/api/collect")
+    _wait_done(client)
+    d = client.get("/api/ipos/01956751").json()
+    assert d["verdict"]["status"] != "CORRECTION"
+    assert d["verdict"]["correction"] is None
+    # sources 에 EFFECTIVENESS_NOTICE 와 PROSPECTUS 모두 포함
+    source_types = {s["doc_type"] for s in d["sources"]}
+    assert "EFFECTIVENESS_NOTICE" in source_types
+    assert "PROSPECTUS" in source_types
+
+
+def test_30_correction_kept_when_no_effectiveness_notice_davio(client, monkeypatch, tmp_path):
+    """지시 #30: 다비오 형태 — 요구 10-06, 기재정정 10-08, **효력발생안내 없음, 투자설명서 없음**
+    → CORRECTION 유지(amended_at = 10-08)."""
+    from app import collect as collect_mod, dart_client as _dc
+    monkeypatch.setattr(collect_mod, "CACHE_DIR", tmp_path / "cache")
+
+    original = _disc("20260915000390", "[정정제출요구]증권신고서(지분증권)",
+                     "01888888", "다비오", rcept_dt="20260915")
+    notice_req = _disc("20261006100034",
+                       "정정신고서제출요구( 2026.09.15. 제출 증권신고서(지분증권) )",
+                       "01888888", "다비오", rcept_dt="20261006")
+    amended = _disc("20261008000705", "[기재정정]증권신고서(지분증권)",
+                    "01888888", "다비오", rcept_dt="20261008")
+
+    monkeypatch.setattr(_dc, "list_disclosures",
+                        lambda **kw: _list_resp([original, notice_req, amended]))
+    monkeypatch.setattr(_dc, "download_document_zip",
+                        lambda *, rcept_no, timeout=20.0: _zip_bytes(_MIN_XML))
+
+    client.post("/api/collect")
+    _wait_done(client)
+    d = client.get("/api/ipos/01888888").json()
+    assert d["verdict"]["status"] == "CORRECTION"
+    assert d["verdict"]["correction"]["requested_at"] == "2026-10-06"
+    assert d["verdict"]["correction"]["amended_at"] == "2026-10-08"
+
+
+def test_30_correction_kept_when_no_amendment_ucast(client, monkeypatch, tmp_path):
+    """지시 #30: 유캐스트 형태 — 요구 10-01, 정정 없음 → CORRECTION 유지(amended_at=null)."""
+    from app import collect as collect_mod, dart_client as _dc
+    monkeypatch.setattr(collect_mod, "CACHE_DIR", tmp_path / "cache")
+
+    bracket = _disc("20260909000378", "[정정제출요구]증권신고서(지분증권)",
+                    "01777777", "유캐스트", rcept_dt="20260909")
+    notice_req = _disc("20261001100050",
+                       "정정신고서제출요구( 2026.9.9. 제출 증권신고서(지분증권) )",
+                       "01777777", "유캐스트", rcept_dt="20261001")
+
+    monkeypatch.setattr(_dc, "list_disclosures",
+                        lambda **kw: _list_resp([bracket, notice_req]))
+    monkeypatch.setattr(_dc, "download_document_zip",
+                        lambda *, rcept_no, timeout=20.0: _zip_bytes(_MIN_XML))
+
+    client.post("/api/collect")
+    _wait_done(client)
+    d = client.get("/api/ipos/01777777").json()
+    assert d["verdict"]["status"] == "CORRECTION"
+    assert d["verdict"]["correction"]["requested_at"] == "2026-10-01"
+    assert d["verdict"]["correction"]["amended_at"] is None
 
 
 def test_correction_cleared_when_final_release_comes_after(client, monkeypatch, tmp_path):

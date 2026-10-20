@@ -538,6 +538,25 @@ def test_extract_offering_counts_old_variants():
         assert res["old"] == 200_000, xml
 
 
+# ---------------- 정확도 보강 #1: 엠에스바이오 유통 포맷(괄호 %) ----------------
+
+def test_extract_tradable_ratio_paren_percent_before_sang_jang():
+    """엠에스바이오 포맷 — '주식수 N주(N%)는 상장 직후 ... 유통가능한 물량입니다'."""
+    from app.parser import extract_tradable_ratio
+    text = (
+        "<P>상기 의무보유 수량을 제외한 주식수 6,347,310주(23.33%)는 "
+        "상장 직후 시장에서 유통가능한 물량입니다.</P>"
+    )
+    assert extract_tradable_ratio(text) == 23.33
+
+
+def test_extract_tradable_ratio_paren_percent_requires_sang_jang_jik_hu():
+    """괄호 % 뒤에 '상장 직후' 서술이 없으면 매치 안 됨(다른 주식수 괄호 % 오탐 방지)."""
+    from app.parser import _RE_TRADABLE_RATIO_NARRATIVE_PAREN
+    text = "<P>신주 100,000주(5%) 추가 발행 예정</P>"
+    assert _RE_TRADABLE_RATIO_NARRATIVE_PAREN.search(text) is None
+
+
 # ---------------- 지시 #21: 주관사·인수회사 추출 ----------------
 
 def test_extract_underwriters_basic():

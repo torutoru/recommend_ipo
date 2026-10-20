@@ -58,7 +58,9 @@ DART_URL = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo="
 #   v10 — 지시 #21(주관사 서술 추출) + #75aebc23 (확정가 전 공모 금액 null)
 #   v11 — 지시 #29 (공모 금액 total×final 우선 + 파생 필드 COALESCE 예외)
 #   v12 — 정확도 보강 배치1 (수요예측 요일 괄호·"일시" 라벨 + 신주/구주 라벨 변형)
-PARSER_VERSION = "v12"
+#   v13 — 정확도 보강 #1 (엠에스바이오 유통 — 괄호 % 서술 + 투자설명서 tradable_ratio 보강)
+#   v14 — 지시 #30 (CORRECTION 해제: 효력발생안내 또는 투자설명서가 요구일 이후 있으면 정상 판정)
+PARSER_VERSION = "v14"
 
 
 # ---------- 분류 ----------
@@ -73,6 +75,8 @@ DOC_TYPE_RULES: list[tuple[re.Pattern, str]] = [
     # 지시 #17 수정 (pm 피드백): 금감원 "정정신고서제출요구( ... )" 공지는 접두 괄호 없이 "정정신고서제출요구" 로 시작.
     # (주의: "[정정제출요구]" 접두가 붙은 문서는 **회사가 낸 원 신고서** 로서 정본 후보.)
     (re.compile(r"^정정신고서제출요구"), "CORRECTION_REQUEST"),
+    # 지시 #30: 금감원 "효력발생안내( ... )" 공지. CORRECTION 해제 트리거.
+    (re.compile(r"^효력발생안내"), "EFFECTIVENESS_NOTICE"),
     (re.compile(r"\[발행조건확정\]증권신고서\(지분증권\)"), "REGISTRATION_AMENDED"),
     (re.compile(r"\[기재정정\]증권신고서\(지분증권\)"), "REGISTRATION_AMENDED"),
     # 지시 #17 수정: "[정정제출요구]증권신고서" 는 회사가 낸 원 신고서 → 정본 후보로 유지(REGISTRATION_AMENDED)
@@ -283,12 +287,20 @@ def process_corp(
             corr_source_label = "bracket"
 
     if corr_req_date_raw:
-        has_final_after = any(
-            is_final_release(s["disclosure"].get("report_nm", ""))
+        # 지시 #30: CORRECTION 해제 트리거 — 요구일 이후에 다음 중 하나라도 있으면 정상 판정
+        #   (1) 발행조건확정 공시
+        #   (2) 금감원 "효력발생안내" 공지(EFFECTIVENESS_NOTICE)
+        #   (3) 회사의 투자설명서(PROSPECTUS / PROSPECTUS_AMENDED)
+        has_release_after = any(
+            (
+                is_final_release(s["disclosure"].get("report_nm", ""))
+                or s["doc_type"] == "EFFECTIVENESS_NOTICE"
+                or s["doc_type"] in ("PROSPECTUS", "PROSPECTUS_AMENDED")
+            )
             and (s["disclosure"].get("rcept_dt", "") or "") > corr_req_date_raw
             for s in raw_sources
         )
-        if not has_final_after:
+        if not has_release_after:
             correction_requested_at = _dash_date(corr_req_date_raw) or None
             if corr_source_label == "bracket":
                 correction_warning = (
@@ -484,9 +496,13 @@ def process_corp(
                 raw_sources=raw_sources, row=row, parsed_warnings=parsed_warnings,
             )
 
-        # 지시 #28: 투자설명서로 수요예측 기간 보강.
-        # 발행조건확정에는 "수요예측 기간" 명시가 거의 없음 — 투자설명서(PROSPECTUS/PROSPECTUS_AMENDED)에 있음.
-        if row.get("demand_forecast_start") is None or row.get("demand_forecast_end") is None:
+        # 지시 #28 + 정확도 보강: 투자설명서로 수요예측 기간 + 유통가능 비율 보강.
+        # 발행조건확정에는 "수요예측 기간"·"유통가능 서술" 명시가 거의 없음 — 투자설명서에 있음(엠에스바이오 사례).
+        if (
+            row.get("demand_forecast_start") is None
+            or row.get("demand_forecast_end") is None
+            or row.get("tradable_ratio") is None
+        ):
             _supplement_from_prospectus(
                 corp_code=corp_code, corp_name=corp_name, core_rcept=rcept_no,
                 raw_sources=raw_sources, row=row, parsed_warnings=parsed_warnings,
@@ -623,6 +639,10 @@ def _supplement_from_prospectus(
     if row.get("demand_forecast_end") is None and pros_parsed.demand_forecast_end:
         row["demand_forecast_end"] = pros_parsed.demand_forecast_end
         changed.append(f"demand_forecast_end={pros_parsed.demand_forecast_end}")
+    # 정확도 보강: 유통가능 비율도 보완(발행조건확정에 서술 없는 엠에스바이오 사례)
+    if row.get("tradable_ratio") is None and pros_parsed.tradable_ratio is not None:
+        row["tradable_ratio"] = pros_parsed.tradable_ratio
+        changed.append(f"tradable_ratio={pros_parsed.tradable_ratio}")
     if changed:
         parsed_warnings.append(
             f"PROSPECTUS({pros_rcept}) 보강 적용 — {', '.join(changed)}"
