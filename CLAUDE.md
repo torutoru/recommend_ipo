@@ -59,10 +59,16 @@ recommend_ipo/
 - **API 값 규칙**: 미공시 값이나 파싱 실패 값은 `null`로 둔다. 0으로 채우지 않는다. 금액은 원 단위 정수, 비율은 0~100 퍼센트, 필드명은 snake_case로 쓴다.
 - **화면 고지**: 모든 화면에 "투자 권유가 아니며 참고용 정보"라는 고지를 표시한다.
 - **비밀값**: DART 키는 `backend/.env.local`의 `DART_CERT_KEY`에만 둔다. 로그, 응답, co-work 파일, 커밋 어디에도 키 값을 쓰지 않는다. 루트 `.gitignore`가 `.env`와 `.env.*`를 제외한다(`.env.example`은 허용).
-- **git 작업**: 커밋과 푸시는 사용자가 요청할 때만 한다.
+- **git 작업**: push는 pm이 검증(테스트·빌드·비밀값 점검)한 뒤 한다(사용자 위임). backend와 frontend는 커밋·푸시하지 않는다.
+
+## 연속 운영 (`.claude/co-work/WORKFLOW.md`)
+- 각 세션은 시작하면 `/loop 10m …`으로 스스로 주기적으로 깨어난다. 감시기 알림만 믿지 않는다.
+- 작업 하나가 끝나면 pm 검증을 기다리지 않고 대기열의 다음 작업으로 넘어간다. 결정이 필요한 작업만 보류하고 질문한다.
+- `.claude/co-work/{역할}-status.md`(updated, state, current, next, blocked_on)를 작업 시작·종료·loop마다 갱신한다. pm은 20분 이상 갱신이 없거나 blocked인 세션을 사용자에게 알린다.
+- 권한 확인 창은 세션을 멈춘다. 사용자가 각 세션에서 `/fewer-permission-prompts`를 직접 실행한다. 세션이 권한 설정을 스스로 바꾸지 않는다.
 
 ## 재개 체크리스트
 1. 자기 역할을 확인한다. 실행 위치나 사용자 안내로 판단한다.
-2. `.claude/co-work/{역할}.md`, `requirements.md`, `api-contract.md`를 읽는다.
+2. `.claude/co-work/WORKFLOW.md`, `{역할}.md`, `{역할}-status.md`, `requirements.md`, `api-contract.md`를 읽는다.
 3. `ls .claude/co-work/{역할}-*`로 미처리 질문과 답변을 확인한다.
-4. 감시기를 띄우고, 메모장의 대기 항목부터 이어서 진행한다.
+4. 기존 감시 프로세스를 정리하고 감시기를 하나만 띄운다. 그다음 `/loop 10m` 사이클을 시작하고 대기열부터 이어서 진행한다.
