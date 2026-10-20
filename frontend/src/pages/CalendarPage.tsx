@@ -32,14 +32,15 @@ const VERDICT_CLS: Record<string, string> = {
   'INCOMPLETE': 'event-incomplete',
 }
 
-const VERDICT_TEXT: Record<string, string> = {
-  'PASS-S':     'S',
-  'PASS-A':     'A',
-  'PASS-B':     'B',
-  'REJECT':     'REJECT',
-  'PENDING':    '대기',
-  'CORRECTION': '정정',
-  'INCOMPLETE': '보류',
+// v1.8 (#21 추가 4번): 칩에는 회사명만 표시 — 이 라벨은 title/aria-label 전용.
+const VERDICT_LABEL: Record<string, string> = {
+  'PASS-S':     '추천 S',
+  'PASS-A':     '추천 A',
+  'PASS-B':     '추천 B',
+  'INCOMPLETE': '판정 보류',
+  'REJECT':     '비추천',
+  'PENDING':    '판정 대기',
+  'CORRECTION': '정정 요구',
 }
 
 function verdictKey(v: Verdict): string {
@@ -241,7 +242,7 @@ export function CalendarPage() {
                     <li key={`${ev.item.id}-${ev.type}-${i}`}>
                       <Link to={`/ipos/${ev.item.id}`}>
                         <span className={`cal-chip ${VERDICT_CLS[verdictKey(ev.item.verdict)]}`}>
-                          {VERDICT_TEXT[verdictKey(ev.item.verdict)]}
+                          {VERDICT_LABEL[verdictKey(ev.item.verdict)]}
                         </span>
                         <span className="cal-item-type">{ev.type === 'LISTING' ? '상장' : '청약'}</span>
                         <span className="cal-item-name">{ev.item.corp_name}</span>
@@ -265,46 +266,49 @@ export function CalendarPage() {
 
 function EventChip({ ev }: { ev: CalEvent }) {
   const key = verdictKey(ev.item.verdict)
-  const label = ev.type === 'LISTING' ? '상장' : '청약'
+  const isListing = ev.type === 'LISTING'
+  const label = isListing ? '상장' : '청약'
+  const roleLabel = VERDICT_LABEL[key]
   const warn = ev.item.verdict.status === 'CORRECTION'
-  const title = warn
-    ? `${ev.item.corp_name} — ${label} (${VERDICT_TEXT[key]}) · 일정 변경 가능`
-    : `${ev.item.corp_name} — ${label} (${VERDICT_TEXT[key]})`
-  // v1.6 (#20): 칩 자체는 non-interactive span. 클릭·포커스는 셀로 위임.
+  // title/aria-label: "회사명 · 청약 · 추천 A" (+ 정정 종목은 "· 일정 변경 가능")
+  const title = `${ev.item.corp_name} · ${label} · ${roleLabel}${warn ? ' · 일정 변경 가능' : ''}`
+  // v1.8 (#21 4·5번) + v1.9 (⚠ 제거):
+  //   - 칩에는 회사명만. 라벨·등급·경고 아이콘 모두 제거.
+  //   - 정정 종목의 "일정 변경 가능" 안내는 title/aria-label·날짜 패널·상세 배너에만 유지.
+  //   - 상장 칩은 상태 색 대신 초록, 본문 "(상장) 회사명" 접두사.
+  const cls = isListing
+    ? 'cal-chip chip-listing'
+    : `cal-chip ${VERDICT_CLS[key]}`
   return (
-    <span
-      className={`cal-chip ${VERDICT_CLS[key]} ${ev.type === 'LISTING' ? 'chip-listing' : ''}`}
-      title={title}
-      aria-hidden="true"
-    >
-      {warn && <span className="chip-warn" aria-label="일정 변경 가능">⚠</span>}
-      <span className="chip-type">{label}</span>
-      <span className="chip-grade">{VERDICT_TEXT[key]}</span>
-      <span className="chip-name">{ev.item.corp_name}</span>
+    <span className={cls} title={title} aria-label={title}>
+      <span className="chip-name">
+        {isListing ? `(상장) ${ev.item.corp_name}` : ev.item.corp_name}
+      </span>
     </span>
   )
 }
 
 function Legend() {
   const items = [
-    { key: 'PASS-S', label: 'S 강력 추천' },
-    { key: 'PASS-A', label: 'A 청약 유망' },
-    { key: 'PASS-B', label: 'B 중립·주의' },
-    { key: 'CORRECTION', label: '⚠ 정정 요구 (일정 변경 가능)' },
-    { key: 'INCOMPLETE', label: '판정 보류 (데이터 확인 필요)' },
-    { key: 'REJECT', label: 'REJECT 비추천' },
-    { key: 'PENDING', label: '판정 대기 (흐리게)' },
+    { key: 'PASS-S',     cls: VERDICT_CLS['PASS-S'],     label: 'S 강력 추천' },
+    { key: 'PASS-A',     cls: VERDICT_CLS['PASS-A'],     label: 'A 청약 유망' },
+    { key: 'PASS-B',     cls: VERDICT_CLS['PASS-B'],     label: 'B 중립·주의' },
+    { key: 'INCOMPLETE', cls: VERDICT_CLS['INCOMPLETE'], label: '판정 보류' },
+    { key: 'REJECT',     cls: VERDICT_CLS['REJECT'],     label: 'REJECT 비추천' },
+    { key: 'NEUTRAL',    cls: 'event-pending',           label: '판정 대기 · 정정 요구' },
+    // v1.8 (#21 5번): 상장은 상태와 무관한 초록 단색 — 별도 범례 항목.
+    { key: 'LISTING',    cls: 'event-listing',           label: '상장' },
   ]
   return (
     <div className="cal-legend" role="list" aria-label="범례">
       <span className="legend-head">범례</span>
       {items.map(it => (
-        <span key={it.key} className={`legend-item ${VERDICT_CLS[it.key]}`} role="listitem">
+        <span key={it.key} className={`legend-item ${it.cls}`} role="listitem">
           <span className="legend-swatch" aria-hidden /> {it.label}
         </span>
       ))}
       <span className="legend-sep">·</span>
-      <span className="legend-note">칩에 "청약" / "상장" 라벨 표기 — <strong>상장</strong> 칩은 테두리 강조.</span>
+      <span className="legend-note">칩은 <strong>회사명만</strong> 표기. 상장은 <strong>초록 단색</strong>으로 구분.</span>
     </div>
   )
 }

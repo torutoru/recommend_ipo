@@ -24,7 +24,10 @@
   --chip-pass-b-bg:     #a4c8ff;  --chip-pass-b-fg:     #0a2b57;  /* contrast 7.5:1 AAA */
   --chip-incomplete-bg: #b45309;  --chip-incomplete-fg: #ffffff;  /* contrast 5.0:1 AA  */
   --chip-reject-bg:     #a3251b;  --chip-reject-fg:     #ffffff;  /* contrast 6.5:1 AAA */
-  --chip-neutral-bg:    #8b96a7;  --chip-neutral-fg:    #1b2733;  /* contrast 5.1:1 AA  */
+  /* v1.7 (#21): 회색을 더 짙게 — 흰 바탕에서 또렷하게. 흰 글씨 사용. */
+  --chip-neutral-bg:    #5f6b7a;  --chip-neutral-fg:    #ffffff;  /* contrast 5.9:1 AA  */
+  /* v1.8 (#21 5번): 상장 전용 초록 — 판정 색과 겹치지 않게. */
+  --chip-listing-bg:    #2e7d32;  --chip-listing-fg:    #ffffff;  /* contrast 4.9:1 AA  */
   --radius: 8px;
 }
 
@@ -462,6 +465,7 @@ table.checklist-table tbody tr.result-info   { background: #fcfcff; }
 .legend-item.event-reject     .legend-swatch { background: var(--chip-reject-bg); }
 .legend-item.event-pending    .legend-swatch { background: var(--chip-neutral-bg); }
 .legend-item.event-correction .legend-swatch { background: var(--chip-neutral-bg); }
+.legend-item.event-listing    .legend-swatch { background: var(--chip-listing-bg); }
 .legend-sep { color: var(--border); }
 .legend-note { color: var(--fg-mute); }
 
@@ -473,7 +477,8 @@ table.checklist-table tbody tr.result-info   { background: #fcfcff; }
 }
 .cal-weekheader {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  /* v1.7 (#21): 7칸 폭 균등 고정. minmax(0,1fr) 로 자식의 min-content 가 열을 밀지 못하게. */
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   border-bottom: 1px solid var(--border);
 }
 .cal-wh {
@@ -489,11 +494,14 @@ table.checklist-table tbody tr.result-info   { background: #fcfcff; }
 
 .cal-body {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  /* v1.7 (#21): 7칸 균등 고정 (요일 헤더와 같은 열 정의). */
+  grid-template-columns: repeat(7, minmax(0, 1fr));
 }
 .cal-cell {
   /* v1.6: 칩에 이름 전체 표시(줄바꿈)로 셀 높이가 유연해져야 함. */
   min-height: 72px;
+  /* v1.7 (#21): grid 자식이 min-content 로 커지지 않게 — 긴 영문 종목명 때문에 열이 밀리는 걸 막음. */
+  min-width: 0;
   padding: 4px 6px 6px;
   border-right: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
@@ -519,32 +527,55 @@ table.checklist-table tbody tr.result-info   { background: #fcfcff; }
 .cal-date { font-size: 12px; font-weight: 600; }
 .cal-chips { display: flex; flex-direction: column; gap: 2px; }
 
+/* 달력 칩 — v1.6(색·클릭) + v1.7(칸 폭 균등·영문 단어 끊기) 통합 선언 */
 .cal-chip {
   display: inline-flex;
-  align-items: center;
+  align-items: flex-start;
+  flex-wrap: wrap;
   gap: 4px;
-  padding: 2px 6px;
+  padding: 3px 6px;
   border-radius: 4px;
   font-size: 11px;
-  color: #fff;
-  line-height: 1.4;
-  text-decoration: none;
-  overflow: hidden;
+  line-height: 1.3;
+  pointer-events: none;         /* 셀 핸들러로 전달 */
+  min-width: 0;                 /* v1.7 */
+  max-width: 100%;              /* v1.7 */
+  overflow-wrap: anywhere;      /* v1.7 */
+  word-break: break-all;        /* v1.7 — 긴 영문도 끊기 */
 }
-.cal-chip:hover { opacity: 0.9; text-decoration: none; }
 .cal-chip .chip-type {
   font-size: 10px;
   padding: 0 4px;
   border-radius: 2px;
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.22);
+  color: inherit;
+  flex: 0 0 auto;
 }
-.cal-chip .chip-grade { font-weight: 700; }
-.cal-chip .chip-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cal-chip.chip-listing { outline: 1.5px dashed rgba(255, 255, 255, 0.9); outline-offset: -2px; }
-.cal-chip.event-pass-s  { background: #0e5e40; }
-.cal-chip.event-pass-a  { background: var(--pass); }
-.cal-chip.event-pass-b  { background: #d79a1e; }
-.cal-chip.event-reject  { background: var(--reject); }
+.cal-chip .chip-grade { font-weight: 700; flex: 0 0 auto; }
+.cal-chip .chip-name {
+  flex: 1 1 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+/* v1.8 (#21 5번): 상장 칩은 상태 색을 덮어쓰고 초록 단색. 점선 테두리 제거. */
+.cal-chip.chip-listing {
+  background: var(--chip-listing-bg) !important;
+  color: var(--chip-listing-fg) !important;
+  outline: none !important;
+}
+
+.cal-chip.event-pass-s     { background: var(--chip-pass-s-bg);     color: var(--chip-pass-s-fg);     }
+.cal-chip.event-pass-a     { background: var(--chip-pass-a-bg);     color: var(--chip-pass-a-fg);     }
+.cal-chip.event-pass-b     { background: var(--chip-pass-b-bg);     color: var(--chip-pass-b-fg);     }
+.cal-chip.event-incomplete { background: var(--chip-incomplete-bg); color: var(--chip-incomplete-fg); }
+.cal-chip.event-reject     { background: var(--chip-reject-bg);     color: var(--chip-reject-fg);     }
+.cal-chip.event-pending    { background: var(--chip-neutral-bg);    color: var(--chip-neutral-fg);    }
+.cal-chip.event-correction { background: var(--chip-neutral-bg);    color: var(--chip-neutral-fg);    }
+
+/* 연한 파랑(B) 만 어두운 글자 — chip-type / chip-listing 보정 */
+.cal-chip.event-pass-b .chip-type       { background: rgba(10, 43, 87, 0.1); }
+.cal-chip.event-pass-b.chip-listing     { outline-color: rgba(10, 43, 87, 0.55); }
 /* PENDING 은 "판정 완료 종목" 이 눈에 띄도록 흐린 톤.
    opacity 가 아닌 배경·글자색 대조로 처리해 텍스트 가독성은 유지. */
 /* v1.6: 이전 흐린 톤 PENDING / 보라 INCOMPLETE / 주황 CORRECTION 선언은 위 규칙으로 교체됨 */
