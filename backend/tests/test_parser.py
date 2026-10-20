@@ -492,6 +492,52 @@ def test_extract_demand_forecast_period_null_when_no_match():
     assert s is None and e is None
 
 
+def test_extract_demand_forecast_period_weekday_parentheses():
+    """정확도 보강: '수요예측 일시 2026년 10월 12일(월) ~ 2026년 10월 16일(금)' — 인텔리빅스 포맷."""
+    from app.parser import extract_demand_forecast_period
+    text = "<P>수요예측 일시 2026년 10월 12일(월) ~ 2026년 10월 16일(금)</P>"
+    s, e = extract_demand_forecast_period(text)
+    assert s == "2026-10-12"
+    assert e == "2026-10-16"
+
+
+def test_extract_demand_forecast_period_weekday_short_year():
+    """요일 괄호 + 연도 반복 생략."""
+    from app.parser import extract_demand_forecast_period
+    text = "<P>수요예측기간 2026년 10월 15일(목) ~ 10월 16일(금)</P>"
+    s, e = extract_demand_forecast_period(text)
+    assert s == "2026-10-15"
+    assert e == "2026-10-16"
+
+
+# ---------------- 정확도 보강: 신주/구주 라벨 변형 ----------------
+
+def test_extract_offering_counts_new_variants():
+    """'신주모집' 뒤 라벨 변형(수량/주식수/주식의 수) 수용."""
+    xmls = [
+        '<DOC><P>신주모집 1,000,000주</P></DOC>',                   # 기존
+        '<DOC><P>신주모집수량 1,000,000주</P></DOC>',
+        '<DOC><P>신주모집주식수 1,000,000주</P></DOC>',
+        '<DOC><P>신주모집주식의 수 1,000,000주</P></DOC>',
+    ]
+    for xml in xmls:
+        res = extract_offering_counts(xml)
+        assert res["new"] == 1_000_000, xml
+
+
+def test_extract_offering_counts_old_variants():
+    """'구주매출' 뒤 라벨 변형 수용."""
+    xmls = [
+        '<DOC><P>구주매출 200,000주</P></DOC>',
+        '<DOC><P>구주매출수량 200,000주</P></DOC>',
+        '<DOC><P>구주매출주식수 200,000주</P></DOC>',
+        '<DOC><P>구주매출주식의 수 200,000주</P></DOC>',
+    ]
+    for xml in xmls:
+        res = extract_offering_counts(xml)
+        assert res["old"] == 200_000, xml
+
+
 # ---------------- 지시 #21: 주관사·인수회사 추출 ----------------
 
 def test_extract_underwriters_basic():
