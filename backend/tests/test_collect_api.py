@@ -811,6 +811,86 @@ def test_fss_notice_excluded_from_core_and_download(client, monkeypatch, tmp_pat
     assert "20260916100012" not in downloaded
 
 
+def test_37_main_loop_filter_relaxed_for_listed_corp(client, monkeypatch, tmp_path):
+    """지시 #37 (pm 원인 특정): 메인 for 루프에서 상장 완료 종목 재처리 — 증분엔 상장 후 새 공시(실적보고서)
+    만 있고 발행조건확정은 범위 밖. 전체 이력 조회에서 is_ipo_candidate=False 라도 분류 가능한 공시 모두 포함
+    되어 발행조건확정이 core 로 선정 → lockup 추출.
+    """
+    from app import collect as collect_mod, dart_client as _dc
+    monkeypatch.setattr(collect_mod, "CACHE_DIR", tmp_path / "cache")
+
+    corp_code = "01754700"
+
+    # 1회차: 상장 전(corp_cls='E', stock_code='') 로 발행조건확정 저장
+    pre = _disc("20261006000447", "[발행조건확정]증권신고서(지분증권)",
+                corp_code, "엘리스그룹", rcept_dt="20261006",
+                corp_cls="E", stock_code="")
+    xml_pre = """<?xml version="1.0" encoding="utf-8"?>
+<DOC>
+<P>공모희망가액 범위(80,000원 ~ 100,000원)</P>
+<P>확정공모가액 90,500원</P>
+<P>본 공시 접수일 2026-10-06</P>
+<P>청약기간: 2026년 10월 13일 ~ 2026년 10월 14일</P>
+<P>모집(매출)주식수 1,200,000주</P>
+<TR><TD>경쟁률</TD><TD>1</TD><TD>2</TD><TD>3</TD><TD>4</TD><TD>5</TD><TD>6</TD><TD>7</TD><TD>8</TD><TD>9</TD><TD>388.84</TD></TR>
+<TR><TD>수량</TD><TD>1</TD><TD>2</TD><TD>3</TD><TD>4</TD><TD>5</TD><TD>6</TD><TD>7</TD><TD>8</TD><TD>9</TD><TD>500000</TD></TR>
+<SPAN>(다) 의무보유확약기간별 수요예측 참여내역</SPAN>
+<TABLE>
+<TR><TD>미확약</TD><TD>82</TD><TD>44,209,300</TD></TR>
+<TR><TD>합</TD><TD>계</TD><TD>87</TD><TD>48,410,500</TD></TR>
+</TABLE>
+<SPAN USERMARK="0X0000FF">(라) 다음 섹션</SPAN>
+<P>상기 의무보유 수량을 제외한 주식수 1,000,000주는 상장 직후 시장에서 유통가능한 물량이며, 상장예정주식수 기준으로 20.81%에 해당합니다.</P>
+</DOC>
+"""
+    monkeypatch.setattr(_dc, "list_disclosures", lambda **kw: _list_resp([pre]))
+    monkeypatch.setattr(_dc, "download_document_zip",
+                        lambda *, rcept_no, timeout=20.0: _zip_bytes(xml_pre))
+    client.post("/api/collect")
+    _wait_done(client)
+
+    # 2회차 — pm 명시 시나리오:
+    #  - 증분 조회(C001) 에 **상장 후 새 공시(실적보고서)** 만 있음 (상장 후 메타 corp_cls='K')
+    #  - 발행조건확정은 범위 밖 → 증분엔 없고 corp_code 전체 이력 조회에만 있음
+    #  - 전체 이력도 상장 후 메타 → is_ipo_candidate=False
+    monkeypatch.setattr(collect_mod, "PARSER_VERSION", "forced-v99")
+    issuance_listed = _disc("20261015000326", "증권발행실적보고서",
+                            corp_code, "엘리스", rcept_dt="20261015",
+                            corp_cls="K", stock_code="0158S0")
+    final_listed = _disc("20261006000447", "[발행조건확정]증권신고서(지분증권)",
+                         corp_code, "엘리스", rcept_dt="20261006",
+                         corp_cls="K", stock_code="0158S0")
+
+    def fake_list(**kw):
+        if kw.get("corp_code") == corp_code:
+            # corp_code 전체 이력 — 상장 후 메타(발행조건확정 포함)
+            return _list_resp([final_listed, issuance_listed])
+        # 증분 C001 조회 — **상장 후 새 공시(실적보고서) 만**
+        return _list_resp([issuance_listed])
+
+    monkeypatch.setattr(_dc, "list_disclosures", fake_list)
+    import shutil
+    if (tmp_path / "cache").exists():
+        shutil.rmtree(tmp_path / "cache")
+    monkeypatch.setattr(_dc, "download_document_zip",
+                        lambda *, rcept_no, timeout=20.0: _zip_bytes(xml_pre))
+
+    client.post("/api/collect")
+    s = _wait_done(client)
+    assert s["status"] == "SUCCEEDED"
+    assert s["summary"]["failed_count"] == 0
+    # 지시 #37 수정 이후: 메인 for 루프의 filtered_full 완화로 발행조건확정이 전체 이력에서 **포함** → core 로 선정
+    # → preserved 로 떨어지지 않고 updated 로 처리
+    unchanged_corps = s["summary"].get("unchanged_corps", [])
+    assert not any(corp_code in c for c in unchanged_corps), \
+        f"엘리스가 unchanged/preserved 로 분류됨: {unchanged_corps}"
+
+    # DB 에 lockup 그대로 저장(또는 유지)
+    after = client.get(f"/api/ipos/{corp_code}").json()
+    assert after["indicators"]["lockup_ratio"] is not None, \
+        f"엘리스 lockup null — 재처리에서 발행조건확정 선정 실패"
+
+
 def test_36_e2e_listed_corp_lockup_extracted_full_flow(client, monkeypatch, tmp_path):
     """지시 #36: pm 요구 — **상장 후 메타** fixture 로 `_run()` 끝까지 (process_corp → extract_lockup → upsert)
     를 실제 돌려 lockup 저장 확인. 엘리스 Render null 재현 통합 테스트.

@@ -65,7 +65,8 @@ DART_URL = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo="
 #   v17 — 보강 묶음 (D: estkRs 교차검증 + C: Turso transaction 묶음)
 #   v18 — 지시 #35 (상장 완료 종목 재처리 — stale-only + 메인 루프 필터 완화 + ABOVE_BAND 라벨 교체)
 #   v19 — 지시 #36 (unchanged_corps 로그 + 강제 재처리 bump — 엘리스 운영 null 재검증)
-PARSER_VERSION = "v19"
+#   v20 — 지시 #37 (메인 for 루프 filtered_full 완화 — stale-only 와 동일 — 엘리스 preserved 사고 해소)
+PARSER_VERSION = "v20"
 
 
 # ---------- 분류 ----------

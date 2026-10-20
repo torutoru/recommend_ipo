@@ -243,12 +243,13 @@ def _run() -> None:
                         f"종목 전체 이력 조회 실패 — {_sanitize_error(fe)} / 증분 범위로 fallback",
                     )
                 if full_items:
-                    # IPO 후보 필터 통과한 공시 + 금감원 공지(CORRECTION_REQUEST/EFFECTIVENESS_NOTICE) 포함
+                    # 지시 #37 (pm 원인 특정): 메인 for 루프의 필터도 stale-only 루프와 **동일 완화**.
+                    # 상장 후 엘리스처럼 corp_cls='K' + stock_code 할당된 종목은 is_ipo_candidate=False.
+                    # 분류 가능한 공시(발행조건확정 포함) 전부 포함해야 core 가 선정됨 — 그렇지 않으면 preserved 로 떨어짐.
                     filtered_full = [
                         it for it in full_items
                         if collect_mod.is_ipo_candidate(it)
-                        or collect_mod.classify_report(it.get("report_nm", ""))
-                            in ("CORRECTION_REQUEST", "EFFECTIVENESS_NOTICE")
+                        or collect_mod.classify_report(it.get("report_nm", "")) is not None
                     ]
                     if filtered_full:
                         items_for_process = sorted(
@@ -274,7 +275,9 @@ def _run() -> None:
             elif r.get("status") == "preserved":
                 # 지시 #24: core 없음(ISSUANCE_REPORT 만) + 기존 레코드 있음 → 지표 보존 (unchanged 로 계수)
                 summary.unchanged_count += 1
-                summary.unchanged_corps.append(f"{corp_name}({corp_code}) preserved")
+                # 지시 #37: preserved 사유 포함 — 다음 라운드 특정 쉬움
+                _reason = (r.get("reason") or "").replace(" ", "-")[:40] or "no-core"
+                summary.unchanged_corps.append(f"{corp_name}({corp_code}) preserved:{_reason}")
             elif is_new:
                 summary.new_count += 1
             else:
@@ -334,7 +337,10 @@ def _run() -> None:
                 _add_failure(corp_code, corp_name, r.get("reason") or r["status"])
             elif r.get("status") == "preserved":
                 summary.unchanged_count += 1
-                summary.unchanged_corps.append(f"{corp_name}({corp_code}) stale-only:preserved")
+                _reason = (r.get("reason") or "").replace(" ", "-")[:40] or "no-core"
+                summary.unchanged_corps.append(
+                    f"{corp_name}({corp_code}) stale-only:preserved:{_reason}"
+                )
             else:
                 summary.updated_count += 1
         except Exception as e:
