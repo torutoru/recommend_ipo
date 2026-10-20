@@ -218,7 +218,7 @@ def _reason_lines(
         )
 
     pos_label = {
-        "ABOVE_BAND": "밴드 상단 초과",
+        "ABOVE_BAND": "밴드 최상단 초과",
         "TOP_OF_BAND": "밴드 최상단",
         "WITHIN_BAND": "밴드 내",
         "BELOW_BAND": "밴드 하단 미만",
@@ -403,7 +403,7 @@ def _fmt_price_position(ind: Indicators) -> Optional[str]:
     if pos is None:
         return None
     return {
-        "ABOVE_BAND": "밴드 상단 초과",
+        "ABOVE_BAND": "밴드 최상단 초과",
         "TOP_OF_BAND": "밴드 최상단",
         "WITHIN_BAND": "밴드 내",
         "BELOW_BAND": "밴드 하단 미만",
@@ -466,7 +466,7 @@ def build_checklist(
     else:
         pp_result = "NOT_MET"
     pp_criterion = " 또는 ".join(
-        {"ABOVE_BAND": "밴드 상단 초과", "TOP_OF_BAND": "밴드 최상단",
+        {"ABOVE_BAND": "밴드 최상단 초과", "TOP_OF_BAND": "밴드 최상단",
          "WITHIN_BAND": "밴드 내", "BELOW_BAND": "밴드 하단 미만"}[p]
         for p in cl.price_positions_met
     )

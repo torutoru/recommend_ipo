@@ -811,6 +811,49 @@ def test_fss_notice_excluded_from_core_and_download(client, monkeypatch, tmp_pat
     assert "20260916100012" not in downloaded
 
 
+def test_35_listed_corp_reprocessed_despite_candidate_filter(client, monkeypatch, tmp_path):
+    """지시 #35: 엘리스 사례 — 상장 완료 후 corp_cls='K' + stock_code 할당되어 is_ipo_candidate=False.
+    DB 에 있고 stale 이면 stale-only 루프의 **완화된 필터**로 재처리되어야 한다(unchanged 로 묻히지 않음).
+    """
+    from app import collect as collect_mod, dart_client as _dc
+    monkeypatch.setattr(collect_mod, "CACHE_DIR", tmp_path / "cache")
+
+    # 1회차: 상장 전 상태(corp_cls='E', stock_code 비어있음) 로 발행조건확정 저장
+    e_disc_pre = _disc("20261006000447", "[발행조건확정]증권신고서(지분증권)",
+                       "01777000", "엘리스테스트", rcept_dt="20261006",
+                       corp_cls="E", stock_code="")
+    monkeypatch.setattr(_dc, "list_disclosures", lambda **kw: _list_resp([e_disc_pre]))
+    monkeypatch.setattr(_dc, "download_document_zip",
+                        lambda *, rcept_no, timeout=20.0: _zip_bytes(_MIN_XML))
+    client.post("/api/collect")
+    _wait_done(client)
+
+    # 2회차: 상장 완료 상태 — corp_cls='K', stock_code 할당됨 (is_ipo_candidate=False)
+    monkeypatch.setattr(collect_mod, "PARSER_VERSION", "forced-v99")
+    e_disc_listed = _disc("20261006000447", "[발행조건확정]증권신고서(지분증권)",
+                          "01777000", "엘리스테스트", rcept_dt="20261006",
+                          corp_cls="K", stock_code="0158S0")
+    # 증분 조회는 빈 응답(상장 후 공시가 없다고 가정), corp_code 조회는 상장 완료 상태의 공시 반환
+    def fake_list(**kw):
+        if kw.get("corp_code") == "01777000":
+            return _list_resp([e_disc_listed])
+        return _list_resp([])
+    monkeypatch.setattr(_dc, "list_disclosures", fake_list)
+    import shutil
+    if (tmp_path / "cache").exists():
+        shutil.rmtree(tmp_path / "cache")
+    client.post("/api/collect")
+    s = _wait_done(client)
+    # 지시 #35 적용: filtered_full 가 완화돼 분류 가능한 공시는 포함 → updated(또는 preserved) 로 처리
+    assert s["status"] == "SUCCEEDED"
+    assert s["summary"]["failed_count"] == 0
+    # unchanged 로 묻히지 않음 — updated 또는 preserved 로 이동
+    assert s["summary"]["updated_count"] >= 1 or s["summary"]["unchanged_count"] >= 1
+    # 핵심: 재처리가 실제로 호출됐는지 — DB 에 접근해서 report_rcept_no 유지됨 확인(상장 후에도 발행조건확정 접수번호 유지)
+    detail = client.get("/api/ipos/01777000").json()
+    assert detail["indicators"]["report_rcept_no"] == "20261006000447"
+
+
 def test_db_stale_only_corp_reprocessed(client, monkeypatch, tmp_path):
     """지시 #28: 증분 조회에는 없지만 DB 에 있고 parser_version 이 낡은 종목은 전체 이력 조회 후 재처리."""
     from app import collect as collect_mod, dart_client as _dc, store

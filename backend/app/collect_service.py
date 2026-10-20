@@ -189,6 +189,20 @@ def _run() -> None:
 
     # IPO 후보 그룹핑
     grouped = collect_mod.group_by_corp(disclosures)
+    # 지시 #35 pm 추가: 메인 루프에도 is_ipo_candidate 완화 — 상장 완료된 **기존 종목**의 증분 공시도 포함.
+    # group_by_corp 는 is_ipo_candidate 로 필터 → 엘리스처럼 상장 후 corp_cls='K' 종목이 빠짐.
+    # DB 에 있던 종목이면 분류 가능한 공시는 재파싱 대상으로 추가.
+    for d in disclosures:
+        corp_code = d.get("corp_code")
+        if not corp_code or corp_code not in existing_corp_codes:
+            continue
+        if collect_mod.classify_report(d.get("report_nm", "")) is None:
+            continue
+        bucket = grouped.setdefault(corp_code, [])
+        if not any(it.get("rcept_no") == d.get("rcept_no") for it in bucket):
+            bucket.append(d)
+    for cc in grouped:
+        grouped[cc].sort(key=lambda it: it.get("rcept_dt", ""))
     total_disclosures = sum(len(v) for v in grouped.values())
     _set(progress=CollectProgress(done=0, total=total_disclosures))
 

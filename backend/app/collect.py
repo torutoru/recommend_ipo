@@ -63,7 +63,8 @@ DART_URL = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo="
 #   v15 — 지시 #32 (correction 메타 COALESCE 예외 — 해제 조건 성립 시 null 로 교체)
 #   v16 — 정확도 보강 #정확도-배치3 (엘리스그룹 확약 — 라벨 "합/계" COLSPAN 분리 수용)
 #   v17 — 보강 묶음 (D: estkRs 교차검증 + C: Turso transaction 묶음)
-PARSER_VERSION = "v17"
+#   v18 — 지시 #35 (상장 완료 종목 재처리 — stale-only + 메인 루프 필터 완화 + ABOVE_BAND 라벨 교체)
+PARSER_VERSION = "v18"
 
 
 # ---------- 분류 ----------
