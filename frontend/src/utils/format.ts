@@ -65,9 +65,10 @@ export function marketLabel(m: Market | null): string {
   return m
 }
 
+// v1.6 (#24): "밴드 상단" → "밴드 최상단" 로 통일.
 const PRICE_POSITION_LABEL: Record<PricePosition, string> = {
-  ABOVE_BAND: '밴드 상단 초과',
-  TOP_OF_BAND: '밴드 상단',
+  ABOVE_BAND: '밴드 최상단 초과',
+  TOP_OF_BAND: '밴드 최상단',
   WITHIN_BAND: '밴드 내',
   BELOW_BAND: '밴드 하단 미만',
 }

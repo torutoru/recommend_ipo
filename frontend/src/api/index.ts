@@ -30,8 +30,8 @@ export const api = {
   async listIpos(params?: Parameters<Api['listIpos']>[0]) {
     return (await load()).listIpos(params)
   },
-  async getIpo(id: string, shares?: number) {
-    return (await load()).getIpo(id, shares)
+  async getIpo(id: string) {
+    return (await load()).getIpo(id)
   },
   async getScoringConfig() {
     return (await load()).getScoringConfig()

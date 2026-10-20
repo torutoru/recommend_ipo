@@ -8,10 +8,9 @@ import type {
   IpoDetail,
   IpoSummary,
   ListParams,
-  MinDeposit,
   ScoringConfig,
 } from '../types'
-import { fmtKrw, fmtPct, fmtRatio } from '../utils/format'
+import { fmtPct, fmtRatio } from '../utils/format'
 import { HttpError } from '../utils/httpError'
 
 // --- scoring config (mock) — api-contract v1.0 ---------------------------
@@ -52,7 +51,6 @@ const CONFIG: ScoringConfig = {
     },
   },
   grade: { pass_min: 50, s_min: 80, a_min: 65 },
-  deposit: { default_shares: 10, margin_rate: 0.5, fee_krw: 2000 },
   checklist: {
     // v0.9: competition_min → good_min + very_good_min
     competition_good_min: 1000,
@@ -408,7 +406,7 @@ const summaries: IpoSummary[] = [
   },
 ]
 
-type DetailSeed = Omit<IpoDetail, 'min_deposit' | 'checklist'>
+type DetailSeed = Omit<IpoDetail, 'checklist'>
 
 const seed: Record<string, DetailSeed> = {
   [PASS_S_ID]: {
@@ -896,21 +894,15 @@ function delay<T>(v: T, ms = 150): Promise<T> {
   return new Promise(resolve => setTimeout(() => resolve(v), ms))
 }
 
-function computeMinDeposit(final_price: number | null, shares: number): MinDeposit | null {
-  if (final_price === null) return null
-  const deposit = Math.round(final_price * shares * CONFIG.deposit.margin_rate)
-  const fee = CONFIG.deposit.fee_krw
-  return { shares, deposit_krw: deposit, fee_krw: fee, total_krw: deposit + fee }
-}
-
 const POSITION_SHORT: Record<NonNullable<Indicators['price_position']>, string> = {
-  ABOVE_BAND: '밴드 상단 초과',
-  TOP_OF_BAND: '밴드 상단',
+  // v1.6 (#24): 라벨 통일 — "밴드 상단" → "밴드 최상단".
+  ABOVE_BAND: '밴드 최상단 초과',
+  TOP_OF_BAND: '밴드 최상단',
   WITHIN_BAND: '밴드 내',
   BELOW_BAND: '밴드 하단 미만',
 }
 
-function buildChecklist(ind: Indicators, final_price: number | null): ChecklistItem[] {
+function buildChecklist(ind: Indicators): ChecklistItem[] {
   const c = CONFIG.checklist
 
   // v0.9: competition — MET 기준은 good_min(1000), level 은 VERY_GOOD(≥1500) / GOOD(≥1000)
@@ -953,10 +945,8 @@ function buildChecklist(ind: Indicators, final_price: number | null): ChecklistI
         ? 'MET'
         : 'NOT_MET'
 
-  const depositActual =
-    final_price === null
-      ? null
-      : fmtKrw(Math.round(final_price * CONFIG.deposit.default_shares * CONFIG.deposit.margin_rate) + CONFIG.deposit.fee_krw)
+  // v1.5 (#22): min_deposit·sell_timing 항목은 체크리스트에서 삭제됨.
+  // (증거금 계산 영역·안내 매도 전략 문구는 상세·안내 화면에 그대로 유지)
 
   return [
     {
@@ -993,24 +983,6 @@ function buildChecklist(ind: Indicators, final_price: number | null): ChecklistI
       criterion: `유통 ≤ ${c.flow_tradable_max}% 그리고 구주 < ${c.flow_old_share_lt}%`,
       actual: flowActual,
       result: flowResult,
-      level: null,
-    },
-    {
-      key: 'min_deposit',
-      label: '5. 최소 증거금',
-      indicator: '균등배정 최소 증거금 (수수료 포함)',
-      criterion: `${CONFIG.deposit.default_shares}주 × 확정가 × ${CONFIG.deposit.margin_rate * 100}% + 수수료 ${CONFIG.deposit.fee_krw.toLocaleString()}원`,
-      actual: depositActual,
-      result: 'INFO',
-      level: null,
-    },
-    {
-      key: 'sell_timing',
-      label: '6. 매도 타이밍',
-      indicator: '상장일 매도 시점',
-      criterion: '상장일 시초가 ~ 오전 10시 이전',
-      actual: '상장일 시초가 ~ 10시',
-      result: 'INFO',
       level: null,
     },
   ]
@@ -1097,15 +1069,14 @@ export async function listIpos(params: ListParams = {}): Promise<{ items: IpoSum
   return delay({ items })
 }
 
-export async function getIpo(id: string, shares = 10): Promise<IpoDetail> {
+export async function getIpo(id: string): Promise<IpoDetail> {
   const row = seed[id]
   if (!row) {
     throw new Error(`해당 종목을 찾을 수 없습니다 (id=${id}).`)
   }
   const detail: IpoDetail = {
     ...row,
-    min_deposit: computeMinDeposit(row.final_price, shares),
-    checklist: buildChecklist(row.indicators, row.final_price),
+    checklist: buildChecklist(row.indicators),
   }
   return delay(detail)
 }

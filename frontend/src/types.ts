@@ -27,15 +27,14 @@ export type DocType =
 export type CompetitionRateType = 'simple' | 'weighted'
 export type LockupRatioBasis = 'allocated' | 'applied'
 
+// v1.5 (#22): 체크리스트는 4항목만 — min_deposit·sell_timing 삭제.
 export type ChecklistKey =
   | 'competition'
   | 'price_position'
   | 'lockup'
   | 'flow'
-  | 'min_deposit'
-  | 'sell_timing'
 
-export type ChecklistResult = 'MET' | 'NOT_MET' | 'UNKNOWN' | 'INFO'
+export type ChecklistResult = 'MET' | 'NOT_MET' | 'UNKNOWN'
 
 export interface ChecklistItem {
   key: ChecklistKey
@@ -115,21 +114,16 @@ export interface SourceDoc {
   url: string
 }
 
-export interface MinDeposit {
-  shares: number
-  deposit_krw: number
-  fee_krw: number
-  total_krw: number
-}
+// v1.6 (#23): MinDeposit interface 제거.
 
 export interface IpoDetail extends IpoSummary {
   indicators: Indicators
   scores: Scores
   reasons: string[]
   reject_reasons: string[]
-  min_deposit: MinDeposit | null
+  // v1.6: `min_deposit` 는 폐지. backend 가 아직 보내도 UI 에서 참조하지 않음 — 타입에서도 제거.
   sources: SourceDoc[]
-  // v0.3: 가이드 2장 — 항상 6개, key 순서 고정
+  // v1.5 (#22): 체크리스트 4항목 — min_deposit·sell_timing 삭제
   checklist: ChecklistItem[]
   // v1.2: 주관사·공동주관사 이름 (사람이 읽는 그대로). 빈 배열이면 미공시.
   underwriters: string[]
@@ -223,11 +217,7 @@ export interface ScoringConfig {
     s_min: number
     a_min: number
   }
-  deposit: {
-    default_shares: number
-    margin_rate: number
-    fee_krw: number
-  }
+  // v1.6 (#23): deposit 삭제.
   checklist: {
     // v0.9: competition_min → good_min + very_good_min 로 분리.
     competition_good_min: number

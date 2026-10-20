@@ -86,8 +86,9 @@ export async function listIpos(params: ListParams = {}): Promise<{ items: IpoSum
   return getJson(`/ipos${qs({ ...params })}`)
 }
 
-export async function getIpo(id: string, shares = 10): Promise<IpoDetail> {
-  return getJson(`/ipos/${encodeURIComponent(id)}${qs({ shares })}`)
+export async function getIpo(id: string): Promise<IpoDetail> {
+  // v1.6 (#23): shares 쿼리 제거.
+  return getJson(`/ipos/${encodeURIComponent(id)}`)
 }
 
 export async function getScoringConfig(): Promise<ScoringConfig> {

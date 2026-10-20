@@ -12,18 +12,25 @@ function metCfg(level: ChecklistLevel | null): ResultCfg {
 const BASE_CFG: Record<Exclude<ChecklistResult, 'MET'>, ResultCfg> = {
   NOT_MET: { icon: '✗', label: '불만족', cls: 'result-notmet' },
   UNKNOWN: { icon: '—', label: '미공시', cls: 'result-unknown' },
-  INFO:    { icon: '',  label: '정보',   cls: 'result-info' },
 }
 
 function cfgFor(item: ChecklistItem): ResultCfg {
   // v0.9 backend 미반영 응답은 level 필드 자체가 없을 수 있음 → ?? null 로 default 경로.
-  return item.result === 'MET' ? metCfg(item.level ?? null) : BASE_CFG[item.result]
+  if (item.result === 'MET') return metCfg(item.level ?? null)
+  return BASE_CFG[item.result] ?? BASE_CFG.UNKNOWN
 }
 
+// v1.5 (#22): 화면 표시 대상 key. backend 가 아직 6개(min_deposit·sell_timing 포함) 를 보내도
+// 모르는 key 는 걸러서 UI 가 깨지지 않도록 한다.
+const DISPLAY_KEYS = new Set<string>(['competition', 'price_position', 'lockup', 'flow'])
+
 export function Checklist({ items }: { items: ChecklistItem[] }) {
-  const judged = items.filter(it => it.result === 'MET' || it.result === 'NOT_MET' || it.result === 'UNKNOWN')
-  const metCount = judged.filter(it => it.result === 'MET').length
-  const totalJudged = judged.length
+  // 알 수 없는 key / 레거시 INFO 결과는 화면에서 제거.
+  const visibleItems = items.filter(
+    it => DISPLAY_KEYS.has(it.key) && (it.result === 'MET' || it.result === 'NOT_MET' || it.result === 'UNKNOWN'),
+  )
+  const metCount = visibleItems.filter(it => it.result === 'MET').length
+  const totalJudged = visibleItems.length
 
   return (
     <section className="checklist">
@@ -44,7 +51,7 @@ export function Checklist({ items }: { items: ChecklistItem[] }) {
             </tr>
           </thead>
           <tbody>
-            {items.map(item => {
+            {visibleItems.map(item => {
               const cfg = cfgFor(item)
               return (
                 <tr key={item.key} className={cfg.cls}>
@@ -53,14 +60,10 @@ export function Checklist({ items }: { items: ChecklistItem[] }) {
                   <td>{item.criterion}</td>
                   <td>{item.actual ?? '미공시'}</td>
                   <td>
-                    {item.result === 'INFO' ? (
-                      <span className="result-badge result-info" title="정보 항목">—</span>
-                    ) : (
-                      <span className={`result-badge ${cfg.cls}`} role="status">
-                        <span className="result-icon" aria-hidden>{cfg.icon}</span>
-                        <span>{cfg.label}</span>
-                      </span>
-                    )}
+                    <span className={`result-badge ${cfg.cls}`} role="status">
+                      <span className="result-icon" aria-hidden>{cfg.icon}</span>
+                      <span>{cfg.label}</span>
+                    </span>
                   </td>
                 </tr>
               )

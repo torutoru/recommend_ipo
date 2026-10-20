@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../api'
 import { ErrorBox, Loading } from '../components/Loading'
 import type { ScoringConfig } from '../types'
-import { fmtKrw, fmtKrwAbbrev, pricePositionLabel } from '../utils/format'
+import { fmtKrwAbbrev, pricePositionLabel } from '../utils/format'
 
 export function ScoringConfigPage() {
   const [cfg, setCfg] = useState<ScoringConfig | null>(null)
@@ -37,7 +37,8 @@ export function ScoringConfigPage() {
 }
 
 function ScoringConfigView({ cfg }: { cfg: ScoringConfig }) {
-  const { score: sc, grade: gr, deposit: dp, checklist: ck } = cfg
+  // v1.6 (#23): deposit 필드 폐지.
+  const { score: sc, grade: gr, checklist: ck } = cfg
   return (
     <>
       <h3>1. 점수 (100점 만점)</h3>
@@ -111,15 +112,9 @@ function ScoringConfigView({ cfg }: { cfg: ScoringConfig }) {
         </tbody>
       </table>
 
-      <h3>3. 균등 배정 최소 증거금</h3>
-      <p>
-        <code>
-          필요 금액 = {dp.default_shares}주 × 확정 공모가 × {dp.margin_rate * 100}% + 청약 수수료 {fmtKrw(dp.fee_krw)}
-        </code>
-      </p>
-      <p>상세 화면에서 수량을 직접 바꿔 재계산할 수 있습니다 (<code>?shares=N</code>).</p>
+      {/* v1.6 (#23): 균등 배정 최소 증거금 섹션 폐지. */}
 
-      <h3>4. 체크리스트 만족 기준</h3>
+      <h3>3. 체크리스트 만족 기준</h3>
       <table className="grade-table">
         <tbody>
           <tr>

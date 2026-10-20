@@ -27,6 +27,9 @@ import {
   pricePositionLabel,
 } from '../utils/format'
 
+// v1.6 (#24): 공모가 위치 카드의 짧은 기준 힌트.
+const PRICE_HINT = '최상단 초과 시 25점'
+
 type IndicatorRow = {
   label: string
   value: string
@@ -54,6 +57,8 @@ function buildIndicatorRows(detail: IpoDetail): IndicatorRow[] {
     {
       label: '② 확정 공모가 위치 (희망 밴드 대비)',
       value: pricePositionLabel(ind.price_position),
+      // v1.6 (#24): 카드 하단에 짧은 기준 힌트.
+      sub: PRICE_HINT,
       scoreValue: s.price,
       scoreMax: 25,
       indicatorMissing: ind.price_position === null,
@@ -83,29 +88,21 @@ function scoreLabel(row: IndicatorRow): string {
 
 export function DetailPage() {
   const { id } = useParams<{ id: string }>()
-  const [shares, setShares] = useState<number>(10)
-  const [sharesInput, setSharesInput] = useState<string>('10')
   const [detail, setDetail] = useState<IpoDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  // v1.6 (#23): shares 쿼리 제거 — 증거금 영역 폐지.
   useEffect(() => {
     if (!id) return
     let cancelled = false
     setDetail(null)
     setError(null)
     api
-      .getIpo(id, shares)
+      .getIpo(id)
       .then(d => { if (!cancelled) setDetail(d) })
       .catch(e => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)) })
     return () => { cancelled = true }
-  }, [id, shares])
-
-  function onSubmitShares(e: React.FormEvent) {
-    e.preventDefault()
-    const n = parseInt(sharesInput, 10)
-    if (!Number.isFinite(n) || n <= 0) return
-    setShares(n)
-  }
+  }, [id])
 
   if (!id) return <p>잘못된 요청입니다.</p>
   if (error) return <ErrorBox message={error} />
@@ -121,7 +118,6 @@ export function DetailPage() {
   const execGuide = gradeExecGuide(detail.verdict.status, detail.verdict.grade)
 
   const ind = detail.indicators
-  const md = detail.min_deposit
 
   return (
     <section className="page page-detail">
@@ -290,38 +286,7 @@ export function DetailPage() {
         </>
       )}
 
-      <h3>균등 배정 최소 증거금</h3>
-      <form className="deposit-form" onSubmit={onSubmitShares}>
-        <label>
-          수량(주){' '}
-          <input
-            type="number"
-            min={1}
-            step={1}
-            value={sharesInput}
-            onChange={e => setSharesInput(e.target.value)}
-          />
-        </label>
-        <button type="submit">다시 계산</button>
-      </form>
-      {md === null ? (
-        <p className="empty">확정 공모가 미공시 — 계산 불가.</p>
-      ) : (
-        <dl className="deposit-breakdown">
-          <div>
-            <dt>증거금 ({md.shares}주 × {fmtOrNull(detail.final_price, fmtKrw)} × 50%)</dt>
-            <dd>{fmtKrw(md.deposit_krw)}</dd>
-          </div>
-          <div>
-            <dt>청약 수수료</dt>
-            <dd>{fmtKrw(md.fee_krw)}</dd>
-          </div>
-          <div className="deposit-total">
-            <dt>합계</dt>
-            <dd><strong>{fmtKrw(md.total_krw)}</strong></dd>
-          </div>
-        </dl>
-      )}
+      {/* v1.6 (#23): 균등 배정 최소 증거금 섹션 폐지. 안내 매도 전략 문구는 /guide 로 이동 유지. */}
 
       <h3>원문 공시 (DART)</h3>
       {detail.sources.length === 0 ? (
