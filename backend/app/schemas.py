@@ -157,6 +157,9 @@ class IpoList(BaseModel):
 class HealthResponse(BaseModel):
     status: Literal["ok"] = "ok"
     last_collected_at: Optional[str] = None
+    # 지시 #31: 배포 상태 확인용 — 즉시 어떤 코드가 돌고 있는지 보임
+    parser_version: Optional[str] = None   # 현재 코드의 PARSER_VERSION 상수
+    commit: Optional[str] = None           # 커밋 SHA(앞 7자리) — Render RENDER_GIT_COMMIT 등
 
 
 # ---------- 수집 API (v0.5 + v0.7) ----------

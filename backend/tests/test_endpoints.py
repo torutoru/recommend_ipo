@@ -24,6 +24,26 @@ def test_health_ok(client):
     body = r.json()
     assert body["status"] == "ok"
     assert "last_collected_at" in body
+    # 지시 #31: 배포 상태 확인용 — parser_version 과 commit 노출
+    assert "parser_version" in body
+    from app.collect import PARSER_VERSION
+    assert body["parser_version"] == PARSER_VERSION
+    assert "commit" in body  # 로컬에서는 보통 None
+
+
+def test_health_commit_from_render_env(client, monkeypatch):
+    """지시 #31: RENDER_GIT_COMMIT 환경변수가 있으면 앞 7자리만 노출."""
+    monkeypatch.setenv("RENDER_GIT_COMMIT", "abcdef1234567890")
+    r = client.get("/api/health")
+    assert r.json()["commit"] == "abcdef1"
+
+
+def test_health_commit_null_when_no_env(client, monkeypatch):
+    monkeypatch.delenv("RENDER_GIT_COMMIT", raising=False)
+    monkeypatch.delenv("GIT_COMMIT", raising=False)
+    monkeypatch.delenv("COMMIT_SHA", raising=False)
+    r = client.get("/api/health")
+    assert r.json()["commit"] is None
 
 
 # ---------------------- list ----------------------
