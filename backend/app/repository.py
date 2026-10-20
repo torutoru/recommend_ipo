@@ -20,7 +20,6 @@ from .schemas import (
 from .scoring import (
     build_checklist,
     build_verdict,
-    calc_min_deposit,
     evaluate,
     summary_from_detail,
 )
@@ -72,13 +71,12 @@ def _underwriters_from_row(row: dict) -> list[str]:
         return []
 
 
-def _detail_from_row(row: dict, shares: int) -> IpoDetail:
+def _detail_from_row(row: dict) -> IpoDetail:
     cfg = get_scoring_config()
     ind = _indicators_from_row(row)
     correction = _correction_from_row(row)
     result = evaluate(ind, cfg, correction=correction)
-    deposit = calc_min_deposit(row.get("final_price"), shares, cfg)
-    checklist = build_checklist(ind, deposit, cfg, listing_date=row.get("listing_date"))
+    checklist = build_checklist(ind, cfg)   # v1.5 (지시 #33): 4항목
     return IpoDetail(
         id=row["corp_code"],
         corp_name=row["corp_name"],
@@ -99,7 +97,7 @@ def _detail_from_row(row: dict, shares: int) -> IpoDetail:
         scores=result.scores,
         reasons=result.reasons,
         reject_reasons=result.reject_reasons,
-        min_deposit=deposit,
+        # v1.6 (지시 #34): min_deposit 필드 제거
         sources=_sources_from_row(row),
         checklist=checklist,
         underwriters=_underwriters_from_row(row),   # v1.2 (지시 #21)
@@ -108,21 +106,22 @@ def _detail_from_row(row: dict, shares: int) -> IpoDetail:
 
 # ---------- 공개 API ----------
 
-def all_details(shares: int = 10) -> list[IpoDetail]:
+def all_details() -> list[IpoDetail]:
+    """v1.6 (지시 #34): shares 파라미터 제거."""
     if get_settings().use_sample_data:
-        # 샘플은 기본 10주 기준으로 min_deposit 이 계산되어 있음 — 수량 커스텀은 상세 조회에서만 적용
         return sample_data.all_details()
     rows = store.list_ipos()
-    return [_detail_from_row(r, shares) for r in rows]
+    return [_detail_from_row(r) for r in rows]
 
 
-def get_detail(corp_code: str, shares: int) -> Optional[IpoDetail]:
+def get_detail(corp_code: str) -> Optional[IpoDetail]:
+    """v1.6 (지시 #34): shares 파라미터 제거."""
     if get_settings().use_sample_data:
-        return sample_data.get_detail(corp_code, shares)
+        return sample_data.get_detail(corp_code)
     row = store.get_ipo(corp_code)
     if row is None:
         return None
-    return _detail_from_row(row, shares)
+    return _detail_from_row(row)
 
 
 def last_collected_at() -> Optional[str]:

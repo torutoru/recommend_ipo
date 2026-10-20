@@ -7,7 +7,6 @@ from __future__ import annotations
 from app.scoring import (
     build_checklist,
     build_verdict,
-    calc_min_deposit,
     evaluate,
 )
 from app.schemas import CorrectionInfo, Indicators
@@ -484,24 +483,7 @@ def test_17_build_verdict_carries_correction(cfg):
     assert v.grade is None
 
 
-# ---------------------- 증거금 v0.3 ----------------------
-
-def test_min_deposit_includes_fee_and_total(cfg):
-    d = calc_min_deposit(30_000, 10, cfg)
-    assert d.shares == 10
-    assert d.deposit_krw == 150_000
-    assert d.fee_krw == 2000
-    assert d.total_krw == 152_000
-
-
-def test_min_deposit_custom_shares(cfg):
-    d = calc_min_deposit(50_000, 20, cfg)
-    assert d.deposit_krw == 500_000
-    assert d.total_krw == 502_000
-
-
-def test_min_deposit_none_when_no_price(cfg):
-    assert calc_min_deposit(None, 10, cfg) is None
+# v1.6 (지시 #34): 최소 증거금 테스트 삭제 — 기능 제거.
 
 
 # ---------------------- 불변식 ----------------------
@@ -528,26 +510,20 @@ def test_verdict_null_when_pending(cfg):
     assert v.score is None and v.grade is None
 
 
-# ---------------------- 체크리스트 (v0.3) ----------------------
+# ---------------------- 체크리스트 (v1.5 지시 #33: 판정 4항목만) ----------------------
 
-def test_checklist_six_items_fixed_order(cfg):
-    md = calc_min_deposit(20000, 10, cfg)
-    cl = build_checklist(_ind(), md, cfg)
-    assert [c.key for c in cl] == [
-        "competition", "price_position", "lockup", "flow", "min_deposit", "sell_timing"
-    ]
+def test_checklist_four_items_fixed_order(cfg):
+    cl = build_checklist(_ind(), cfg)
+    assert [c.key for c in cl] == ["competition", "price_position", "lockup", "flow"]
 
 
 def test_checklist_all_met_when_strong(cfg):
-    md = calc_min_deposit(50000, 10, cfg)
-    cl = build_checklist(_ind(), md, cfg)
+    cl = build_checklist(_ind(), cfg)
     by_key = {c.key: c for c in cl}
     assert by_key["competition"].result == "MET"
     assert by_key["price_position"].result == "MET"
     assert by_key["lockup"].result == "MET"
     assert by_key["flow"].result == "MET"
-    assert by_key["min_deposit"].result == "INFO"
-    assert by_key["sell_timing"].result == "INFO"
 
 
 def test_checklist_unknown_when_values_null(cfg):
@@ -558,36 +534,30 @@ def test_checklist_unknown_when_values_null(cfg):
         tradable_ratio=None,
         old_share_ratio=None,
     )
-    cl = build_checklist(ind, None, cfg)
+    cl = build_checklist(ind, cfg)
     by_key = {c.key: c for c in cl}
     for k in ["competition", "price_position", "lockup", "flow"]:
         assert by_key[k].result == "UNKNOWN"
         assert by_key[k].actual is None
-    assert by_key["min_deposit"].actual is None  # 확정가 없으면 None
-    assert by_key["sell_timing"].result == "INFO"
 
 
 def test_checklist_flow_strict_less_than_30(cfg):
     """requirements 9장 확인 — flow MET 조건은 old_share < 30 (strict '<', equal 포함 안 함)."""
-    md = calc_min_deposit(10000, 10, cfg)
-    # old_share == 30.0 → NOT_MET
-    cl = build_checklist(_ind(tradable_ratio=20.0, old_share_ratio=30.0), md, cfg)
+    cl = build_checklist(_ind(tradable_ratio=20.0, old_share_ratio=30.0), cfg)
     assert next(c for c in cl if c.key == "flow").result == "NOT_MET"
-    # old_share == 29.99 → MET
-    cl2 = build_checklist(_ind(tradable_ratio=20.0, old_share_ratio=29.99), md, cfg)
+    cl2 = build_checklist(_ind(tradable_ratio=20.0, old_share_ratio=29.99), cfg)
     assert next(c for c in cl2 if c.key == "flow").result == "MET"
 
 
 def test_checklist_not_met_when_values_fail(cfg):
-    md = calc_min_deposit(10000, 10, cfg)
     ind = _ind(
-        competition_rate=800.0,                 # < 1500 → NOT_MET
+        competition_rate=800.0,                 # < 1000 → NOT_MET
         price_position="BELOW_BAND",            # not in met set → NOT_MET
         lockup_ratio=5.0,                       # < 10 → NOT_MET
         tradable_ratio=40.0,
         old_share_ratio=15.0,                   # tradable > 35 → flow NOT_MET
     )
-    cl = build_checklist(ind, md, cfg)
+    cl = build_checklist(ind, cfg)
     by_key = {c.key: c for c in cl}
     assert by_key["competition"].result == "NOT_MET"
     assert by_key["price_position"].result == "NOT_MET"
@@ -596,29 +566,18 @@ def test_checklist_not_met_when_values_fail(cfg):
 
 
 def test_checklist_actual_formats(cfg):
-    md = calc_min_deposit(28000, 10, cfg)
-    cl = build_checklist(_ind(), md, cfg, listing_date=None)
+    cl = build_checklist(_ind(), cfg)
     by_key = {c.key: c for c in cl}
     assert by_key["competition"].actual == "2,000.00:1"
     assert by_key["price_position"].actual == "밴드 최상단"
     assert by_key["lockup"].actual == "40.0%"
     assert by_key["flow"].actual == "유통 20.0% · 구주 0.0%"
-    assert by_key["min_deposit"].actual == "10주 · 140,000원 + 수수료 2,000원"
-    assert by_key["sell_timing"].actual is None   # listing_date 없음 → null
-
-
-def test_checklist_sell_timing_with_listing_date(cfg):
-    md = calc_min_deposit(28000, 10, cfg)
-    cl = build_checklist(_ind(), md, cfg, listing_date="2026-12-05")
-    by_key = {c.key: c for c in cl}
-    assert by_key["sell_timing"].actual == "상장일 2026-12-05"
 
 
 # ---------------------- 지시 #18: 체크리스트 경쟁률 2단계 ----------------------
 
 def _checklist_comp(cfg, rate):
-    md = calc_min_deposit(10000, 10, cfg)
-    cl = build_checklist(_ind(competition_rate=rate), md, cfg)
+    cl = build_checklist(_ind(competition_rate=rate), cfg)
     return next(c for c in cl if c.key == "competition")
 
 
@@ -669,24 +628,9 @@ def test_18_tnec_1041_is_met_good(cfg):
 
 def test_18_other_items_still_have_no_level(cfg):
     """level 은 competition 전용. 다른 항목은 None 유지."""
-    md = calc_min_deposit(10000, 10, cfg)
-    cl = build_checklist(_ind(), md, cfg)
+    cl = build_checklist(_ind(), cfg)
     for item in cl:
         if item.key != "competition":
             assert item.level is None
 
-
-def test_checklist_criterion_min_deposit_from_config(cfg):
-    md = calc_min_deposit(28000, 10, cfg)
-    cl = build_checklist(_ind(), md, cfg)
-    md_item = next(c for c in cl if c.key == "min_deposit")
-    # 설정값 반영 — "(확정 공모가 × 10주) × 0.5 + 수수료 약 2,000원"
-    assert "10주" in md_item.criterion
-    assert "0.5" in md_item.criterion
-    assert "2,000원" in md_item.criterion
-
-
-def test_checklist_criterion_sell_timing_spec(cfg):
-    cl = build_checklist(_ind(), None, cfg)
-    item = next(c for c in cl if c.key == "sell_timing")
-    assert item.criterion == "상장일 시초가 ~ 오전 10시 이전 매도"
+# v1.6 (지시 #34): min_deposit·sell_timing 체크리스트 테스트 삭제 — 기능 제거.

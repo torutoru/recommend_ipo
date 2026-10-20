@@ -28,7 +28,6 @@ from .schemas import (
     IpoDetail,
     IpoSummary,
     Indicators,
-    MinDeposit,
     PricePosition,
     ScoreRange,
     Scores,
@@ -390,25 +389,8 @@ def evaluate(
     )
 
 
-# ---------- 증거금 (v0.3: fee_krw / total_krw) ----------
-
-def calc_min_deposit(
-    final_price: Optional[int], shares: int, cfg: ScoringConfig
-) -> Optional[MinDeposit]:
-    """균등 배정 최소 증거금. 확정가 없으면 None."""
-    if final_price is None:
-        return None
-    deposit = int(shares * final_price * cfg.deposit.margin_rate)
-    fee = cfg.deposit.fee_krw
-    return MinDeposit(
-        shares=shares,
-        deposit_krw=deposit,
-        fee_krw=fee,
-        total_krw=deposit + fee,
-    )
-
-
-# ---------- 체크리스트 (requirements.md 9장, v0.3) ----------
+# ---------- 체크리스트 (requirements.md 19장, v1.5) ----------
+# v1.6 (지시 #34): calc_min_deposit 함수 제거 — 최소 증거금 기능 자체 삭제.
 
 def _fmt_rate(ind: Indicators) -> Optional[str]:
     if ind.competition_rate is None:
@@ -440,20 +422,12 @@ def _fmt_flow(ind: Indicators) -> Optional[str]:
     return f"유통 {ind.tradable_ratio:.1f}% · 구주 {ind.old_share_ratio:.1f}%"
 
 
-def _fmt_min_deposit(md: Optional[MinDeposit]) -> Optional[str]:
-    if md is None:
-        return None
-    return f"{md.shares}주 · {md.deposit_krw:,}원 + 수수료 {md.fee_krw:,}원"
-
-
 def build_checklist(
     ind: Indicators,
-    md: Optional[MinDeposit],
     cfg: ScoringConfig,
-    *,
-    listing_date: Optional[str] = None,
 ) -> list[ChecklistItem]:
-    """6항목 고정 순서. PENDING 종목도 호출된다 — UNKNOWN 비율이 자연히 많아진다."""
+    """v1.5 (지시 #33): 판정 4항목 고정 — competition / price_position / lockup / flow.
+    기존 min_deposit·sell_timing(INFO) 삭제. PENDING 종목은 UNKNOWN 이 많아진다."""
     cl = cfg.checklist
     items: list[ChecklistItem] = []
 
@@ -539,30 +513,7 @@ def build_checklist(
         result=fl_result,
     ))
 
-    # 5) min_deposit (INFO) — frontend 가 그대로 노출. 설정값 반영.
-    md_cfg = cfg.deposit
-    items.append(ChecklistItem(
-        key="min_deposit",
-        label="최소 증거금",
-        indicator="균등배정 최소 증거금 (수수료 포함)",
-        criterion=(
-            f"(확정 공모가 × {md_cfg.default_shares}주) × {md_cfg.margin_rate} "
-            f"+ 수수료 약 {md_cfg.fee_krw:,}원"
-        ),
-        actual=_fmt_min_deposit(md),
-        result="INFO",
-    ))
-
-    # 6) sell_timing (INFO)
-    items.append(ChecklistItem(
-        key="sell_timing",
-        label="매도 타이밍",
-        indicator="상장일 매도 시점",
-        criterion="상장일 시초가 ~ 오전 10시 이전 매도",
-        actual=(f"상장일 {listing_date}" if listing_date else None),
-        result="INFO",
-    ))
-
+    # v1.5 (지시 #33): min_deposit / sell_timing(INFO) 두 항목 제거 — 판정 4항목만
     return items
 
 

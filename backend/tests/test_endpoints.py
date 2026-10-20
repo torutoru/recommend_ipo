@@ -159,9 +159,10 @@ def test_detail_pending_invariant(client):
     assert d["verdict"]["score"] is None
     assert d["scores"]["total"] is None
     assert d["reject_reasons"] == []
-    assert d["min_deposit"] is None
-    # 체크리스트는 PENDING 에도 내려와야 함 (대부분 UNKNOWN)
-    assert len(d["checklist"]) == 6
+    # v1.6 (지시 #34): min_deposit 필드 제거
+    assert "min_deposit" not in d
+    # 체크리스트는 PENDING 에도 내려와야 함 — v1.5 (지시 #33): 판정 4항목만
+    assert len(d["checklist"]) == 4
     assert any(c["result"] == "UNKNOWN" for c in d["checklist"])
 
 
@@ -187,24 +188,19 @@ def test_detail_v3_price_position_below_band(client):
     assert d["indicators"]["price_position"] == "BELOW_BAND"
 
 
-# ---------------------- min_deposit v0.3 ----------------------
+# ---------------------- v1.6 (지시 #34): min_deposit 기능 제거 ----------------------
 
-def test_min_deposit_v3_fields(client):
+def test_min_deposit_field_absent(client):
+    """응답에 min_deposit 필드 자체가 없다."""
     d = client.get("/api/ipos/00990002").json()
-    md = d["min_deposit"]
-    assert set(md.keys()) == {"shares", "deposit_krw", "fee_krw", "total_krw"}
-    assert md["fee_krw"] == 2000
-    assert md["total_krw"] == md["deposit_krw"] + md["fee_krw"]
+    assert "min_deposit" not in d
 
 
-def test_detail_custom_shares(client):
-    d = client.get("/api/ipos/00990002?shares=20").json()
-    assert d["min_deposit"]["shares"] == 20
-
-
-def test_detail_shares_422_on_zero_or_negative(client):
-    assert client.get("/api/ipos/00990002?shares=0").status_code == 422
-    assert client.get("/api/ipos/00990002?shares=-5").status_code == 422
+def test_shares_query_ignored_not_422(client):
+    """shares 쿼리가 들어와도 422 가 아니라 **그냥 무시**(하위 호환)."""
+    assert client.get("/api/ipos/00990002?shares=10").status_code == 200
+    assert client.get("/api/ipos/00990002?shares=0").status_code == 200
+    assert client.get("/api/ipos/00990002?shares=-5").status_code == 200
 
 
 def test_detail_404(client):
@@ -217,14 +213,15 @@ def test_detail_404(client):
 
 def test_scoring_config_v3_shape(client):
     cfg = client.get("/api/scoring-config").json()
-    assert set(cfg.keys()) == {"score", "grade", "deposit", "checklist"}
+    # v1.6 (지시 #34): deposit 섹션 제거
+    assert set(cfg.keys()) == {"score", "grade", "checklist"}
     assert cfg["score"]["comp"]["max"] == 35
     assert cfg["score"]["comp"]["large_cap_bonus"]["min_offering_amount_krw"] == 100_000_000_000
     assert cfg["score"]["comp"]["large_cap_bonus"]["min_competition_rate"] == 800.0
     assert cfg["score"]["price"]["points"]["ABOVE_BAND"] == 25
     assert cfg["score"]["price"]["points"]["WITHIN_BAND"] == 10
     assert cfg["grade"]["pass_min"] == 50
-    assert cfg["deposit"]["fee_krw"] == 2000
+    assert "deposit" not in cfg
     assert "competition_min" in cfg["checklist"]
 
 

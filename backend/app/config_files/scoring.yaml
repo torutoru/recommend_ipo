@@ -49,11 +49,6 @@ grade:
   s_min: 80
   a_min: 65
 
-deposit:
-  default_shares: 10
-  margin_rate: 0.5
-  fee_krw: 2000
-
 checklist:
   # v0.9 (지시 #18): competition 2단계
   competition_min: 1000.0            # 하위 호환(= competition_good_min)

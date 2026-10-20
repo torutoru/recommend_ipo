@@ -126,10 +126,7 @@ class GradeConfig(BaseModel):
     a_min: int
 
 
-class DepositConfig(BaseModel):
-    default_shares: int
-    margin_rate: float
-    fee_krw: int
+# v1.6 (지시 #34): DepositConfig 제거 — 최소 증거금 기능 자체 삭제.
 
 
 class ChecklistConfig(BaseModel):
@@ -148,7 +145,7 @@ class ChecklistConfig(BaseModel):
 class ScoringConfig(BaseModel):
     score: ScoreConfig
     grade: GradeConfig
-    deposit: DepositConfig
+    # v1.6 (지시 #34): deposit 필드 제거
     checklist: ChecklistConfig
 
 

@@ -21,7 +21,6 @@ from .time_utils import now_iso_kst
 from .scoring import (
     build_checklist,
     build_verdict,
-    calc_min_deposit,
     evaluate,
 )
 
@@ -46,12 +45,11 @@ def _build(
     final_price: int | None,
     indicators: Indicators,
     sources: list[SourceDoc],
-    shares: int = 10,
 ) -> IpoDetail:
+    """v1.5·v1.6 (지시 #33 #34): min_deposit·sell_timing 제거, shares 파라미터 삭제."""
     cfg = get_scoring_config()
     result = evaluate(indicators, cfg)
-    deposit = calc_min_deposit(final_price, shares, cfg)
-    checklist = build_checklist(indicators, deposit, cfg, listing_date=listing_date)
+    checklist = build_checklist(indicators, cfg)
     now = now_iso_kst()
 
     return IpoDetail(
@@ -69,7 +67,6 @@ def _build(
         scores=result.scores,
         reasons=result.reasons,
         reject_reasons=result.reject_reasons,
-        min_deposit=deposit,
         sources=sources,
         updated_at=now,
         checklist=checklist,
@@ -292,14 +289,9 @@ def all_details() -> list[IpoDetail]:
     )
 
 
-def get_detail(corp_code: str, shares: int) -> IpoDetail | None:
-    base = _SAMPLES.get(corp_code)
-    if base is None:
-        return None
-    cfg = get_scoring_config()
-    deposit = calc_min_deposit(base.final_price, shares, cfg)
-    checklist = build_checklist(base.indicators, deposit, cfg, listing_date=base.listing_date)
-    return base.model_copy(update={"min_deposit": deposit, "checklist": checklist})
+def get_detail(corp_code: str) -> IpoDetail | None:
+    """v1.6 (지시 #34): shares 파라미터 제거."""
+    return _SAMPLES.get(corp_code)
 
 
 def last_collected_at() -> str:

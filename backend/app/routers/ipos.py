@@ -72,9 +72,11 @@ def list_ipos(
 @router.get("/{corp_code}", response_model=IpoDetail)
 def get_ipo(
     corp_code: str,
-    shares: int = Query(default=10, ge=1),
+    # v1.6 (지시 #34): shares 쿼리는 들어와도 **무시**(422 반환 안 함, 하위 호환).
+    shares: Optional[int] = Query(default=None),
 ) -> IpoDetail:
-    d = repository.get_detail(corp_code, shares)
+    _ = shares   # 받고 버림
+    d = repository.get_detail(corp_code)
     if d is None:
         raise HTTPException(status_code=404, detail="해당 종목을 찾을 수 없습니다.")
     return d

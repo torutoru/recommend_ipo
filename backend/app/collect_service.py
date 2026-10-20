@@ -286,11 +286,12 @@ def _run() -> None:
                     f"stale 종목 전체 이력 조회 실패 — {_sanitize_error(fe)}",
                 )
                 continue
+            # 지시 #35: 상장 완료된 기존 종목은 corp_cls='K' + stock_code 할당되어 is_ipo_candidate=False.
+            # 하지만 DB 에 있던 종목(엘리스 사례)이면 **분류 가능한 공시 전부** 포함해 재파싱 지속.
             filtered_full = [
                 it for it in full_items
                 if collect_mod.is_ipo_candidate(it)
-                or collect_mod.classify_report(it.get("report_nm", ""))
-                    in ("CORRECTION_REQUEST", "EFFECTIVENESS_NOTICE")
+                or collect_mod.classify_report(it.get("report_nm", "")) is not None
             ]
             if not filtered_full:
                 # 조회됐으나 분류 가능한 공시가 없음 — unchanged 로 계수

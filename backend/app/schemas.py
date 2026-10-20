@@ -36,10 +36,9 @@ ChecklistKey = Literal[
     "price_position",
     "lockup",
     "flow",
-    "min_deposit",
-    "sell_timing",
+    # v1.5 (지시 #33): "min_deposit" / "sell_timing" 삭제 — 체크리스트는 판정 4항목만
 ]
-ChecklistResult = Literal["MET", "NOT_MET", "UNKNOWN", "INFO"]
+ChecklistResult = Literal["MET", "NOT_MET", "UNKNOWN"]   # v1.5: "INFO" 삭제
 # v0.9 (지시 #18): competition 전용 — "좋음"/"아주 좋음" 2단계 표시
 ChecklistLevel = Literal["GOOD", "VERY_GOOD"]
 
@@ -121,11 +120,7 @@ class SourceDoc(BaseModel):
     url: str
 
 
-class MinDeposit(BaseModel):
-    shares: int
-    deposit_krw: int        # shares × final_price × margin_rate
-    fee_krw: int            # v0.3
-    total_krw: int          # v0.3 = deposit_krw + fee_krw
+# v1.6 (지시 #34): MinDeposit 모델 제거 — 균등 배정 최소 증거금 기능 자체 삭제.
 
 
 class ChecklistItem(BaseModel):
@@ -143,9 +138,9 @@ class IpoDetail(IpoSummary):
     scores: Scores
     reasons: list[str] = Field(default_factory=list)
     reject_reasons: list[str] = Field(default_factory=list)
-    min_deposit: Optional[MinDeposit] = None
+    # v1.6 (지시 #34): min_deposit 필드 제거
     sources: list[SourceDoc] = Field(default_factory=list)
-    checklist: list[ChecklistItem] = Field(default_factory=list)   # v0.3 — 항상 6개
+    checklist: list[ChecklistItem] = Field(default_factory=list)   # v1.5 — 판정 4항목
     # v1.2 (지시 #21): 주관사·인수회사 이름(대표→공동→인수 순, 중복 제거). 상세 화면에만 노출.
     underwriters: list[str] = Field(default_factory=list)
 
