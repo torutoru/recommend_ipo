@@ -80,6 +80,13 @@ const CORRECTION_UNAMENDED_ID = '01020201' // v0.8: 정정요구 미제출
 const CORRECTION_AMENDED_ID = '01020202'   // v0.8: 정정요구 → 정정신고서 제출됨
 const RANGE_PASS_ID = '01030301'           // v1.4: 범위 확정 PASS (최소 B)
 const RANGE_REJECT_ID = '01030302'         // v1.4: 범위 확정 REJECT (최대 M점)
+// v1.5 (#19) 달력 정렬 / CORRECTION 숨김 검증용 fixtures — 모두 2026-11-30 청약으로 겹침.
+const CAL_SORT_S_ID = '02000001'
+const CAL_SORT_B_ID = '02000002'
+const CAL_SORT_REJECT_ID = '02000003'
+const CAL_SORT_PENDING_ID = '02000004'
+const CAL_SORT_CORRECTION_ID = '02000005'
+const CAL_SORT_CORRECTION_ONLY_ID = '02000006'  // 다른 날짜(12/2) 에 CORRECTION 단독
 
 // --- summaries ------------------------------------------------------------
 
@@ -321,6 +328,83 @@ const summaries: IpoSummary[] = [
     demand_forecast_start: '2026-12-11',
     demand_forecast_end: '2026-12-12',
     updated_at: '2026-12-13T17:40:00+09:00',
+  },
+  // v1.5 (#19) — 11/30 에 S·B·REJECT·PENDING·CORRECTION 섞인 날 테스트.
+  {
+    id: CAL_SORT_S_ID,
+    corp_name: '(달력) 혼합S',
+    market: 'KOSPI',
+    subscription_start: '2026-11-30', subscription_end: '2026-12-01',
+    listing_date: null,
+    band_low: 30000, band_high: 36000, final_price: 36000,
+    verdict: { status: 'PASS', grade: 'S', score: 85, correction: null, score_range: null },
+    price_confirm_date: '2026-11-26', demand_forecast_start: '2026-11-24', demand_forecast_end: '2026-11-25',
+    updated_at: '2026-11-26T18:00:00+09:00',
+  },
+  {
+    id: CAL_SORT_B_ID,
+    corp_name: '(달력) 혼합B',
+    market: 'KOSDAQ',
+    subscription_start: '2026-11-30', subscription_end: '2026-12-01',
+    listing_date: null,
+    band_low: 12000, band_high: 14000, final_price: 13000,
+    verdict: { status: 'PASS', grade: 'B', score: 58, correction: null, score_range: null },
+    price_confirm_date: '2026-11-26', demand_forecast_start: '2026-11-24', demand_forecast_end: '2026-11-25',
+    updated_at: '2026-11-26T18:00:00+09:00',
+  },
+  {
+    id: CAL_SORT_REJECT_ID,
+    corp_name: '(달력) 혼합REJECT',
+    market: null,
+    subscription_start: '2026-11-30', subscription_end: '2026-12-01',
+    listing_date: null,
+    band_low: 8000, band_high: 10000, final_price: 8000,
+    verdict: { status: 'REJECT', grade: null, score: 20, correction: null, score_range: null },
+    price_confirm_date: '2026-11-26', demand_forecast_start: '2026-11-24', demand_forecast_end: '2026-11-25',
+    updated_at: '2026-11-26T18:00:00+09:00',
+  },
+  {
+    id: CAL_SORT_PENDING_ID,
+    corp_name: '(달력) 혼합PENDING',
+    market: null,
+    subscription_start: '2026-11-30', subscription_end: '2026-12-01',
+    listing_date: null,
+    band_low: 20000, band_high: 24000, final_price: null,
+    verdict: { status: 'PENDING', grade: null, score: null, correction: null, score_range: null },
+    price_confirm_date: '2026-11-27', demand_forecast_start: '2026-11-25', demand_forecast_end: '2026-11-26',
+    updated_at: '2026-11-20T10:00:00+09:00',
+  },
+  {
+    id: CAL_SORT_CORRECTION_ID,
+    corp_name: '(달력) 혼합정정',
+    market: 'KOSDAQ',
+    subscription_start: '2026-11-30', subscription_end: '2026-12-01',
+    listing_date: null,
+    band_low: 15000, band_high: 18000, final_price: null,
+    verdict: {
+      status: 'CORRECTION',
+      grade: null, score: null,
+      correction: { requested_at: '2026-11-25', amended_at: null },
+      score_range: null,
+    },
+    price_confirm_date: '2026-11-28', demand_forecast_start: '2026-11-26', demand_forecast_end: '2026-11-27',
+    updated_at: '2026-11-25T16:30:00+09:00',
+  },
+  {
+    id: CAL_SORT_CORRECTION_ONLY_ID,
+    corp_name: '(달력) 정정단독',
+    market: 'KOSDAQ',
+    subscription_start: '2026-12-02', subscription_end: '2026-12-03',
+    listing_date: null,
+    band_low: 10000, band_high: 12000, final_price: null,
+    verdict: {
+      status: 'CORRECTION',
+      grade: null, score: null,
+      correction: { requested_at: '2026-11-28', amended_at: '2026-12-01' },
+      score_range: null,
+    },
+    price_confirm_date: '2026-11-30', demand_forecast_start: '2026-11-28', demand_forecast_end: '2026-11-29',
+    updated_at: '2026-12-01T15:00:00+09:00',
   },
 ]
 
@@ -706,6 +790,103 @@ const seed: Record<string, DetailSeed> = {
       { doc_type: 'REGISTRATION_AMENDED', rcept_no: '20261213000302', rcept_dt: '2026-12-13', url: dartUrl('20261213000302') },
     ],
     underwriters: ['DB증권'],
+  },
+  // --- v1.5 (#19) 달력 정렬·CORRECTION 숨김 fixtures ---
+  [CAL_SORT_S_ID]: {
+    ...summaries.find(s => s.id === CAL_SORT_S_ID)!,
+    indicators: {
+      competition_rate: 2200, competition_rate_type: 'simple', demand_amount_krw: 8_000_000_000_000,
+      price_position: 'ABOVE_BAND', lockup_ratio: 32.0, lockup_ratio_basis: 'allocated',
+      tradable_ratio: 20.0, old_share_ratio: 0,
+      new_share_count: 1_000_000, old_share_count: 0, total_offering_count: 1_000_000,
+      offering_amount_krw: 36_000_000_000, report_rcept_no: '20261126000001',
+    },
+    scores: { comp: 35, price: 25, lockup: 20, flow: 20, total: 100 },
+    reasons: ['(달력 fixture) 혼합 날짜 S 등급 시연용 — 세부 설명 생략.'],
+    reject_reasons: [],
+    sources: [{ doc_type: 'REGISTRATION_AMENDED', rcept_no: '20261126000001', rcept_dt: '2026-11-26', url: dartUrl('20261126000001') }],
+    underwriters: ['한국투자증권'],
+  },
+  [CAL_SORT_B_ID]: {
+    ...summaries.find(s => s.id === CAL_SORT_B_ID)!,
+    indicators: {
+      competition_rate: 1200, competition_rate_type: 'simple', demand_amount_krw: 1_200_000_000_000,
+      price_position: 'TOP_OF_BAND', lockup_ratio: 7.0, lockup_ratio_basis: 'allocated',
+      tradable_ratio: 30.0, old_share_ratio: 5.0,
+      new_share_count: 950_000, old_share_count: 50_000, total_offering_count: 1_000_000,
+      offering_amount_krw: 13_000_000_000, report_rcept_no: '20261126000002',
+    },
+    scores: { comp: 25, price: 20, lockup: 10, flow: 12, total: 67 },
+    reasons: ['(달력 fixture) 혼합 날짜 B 등급 시연용.'],
+    reject_reasons: [],
+    sources: [{ doc_type: 'REGISTRATION_AMENDED', rcept_no: '20261126000002', rcept_dt: '2026-11-26', url: dartUrl('20261126000002') }],
+    underwriters: ['신한투자증권'],
+  },
+  [CAL_SORT_REJECT_ID]: {
+    ...summaries.find(s => s.id === CAL_SORT_REJECT_ID)!,
+    indicators: {
+      competition_rate: 400, competition_rate_type: 'weighted', demand_amount_krw: 100_000_000_000,
+      price_position: 'BELOW_BAND', lockup_ratio: 2.0, lockup_ratio_basis: 'applied',
+      tradable_ratio: 50.0, old_share_ratio: 35.0,
+      new_share_count: 650_000, old_share_count: 350_000, total_offering_count: 1_000_000,
+      offering_amount_krw: 8_000_000_000, report_rcept_no: '20261126000003',
+    },
+    scores: { comp: 0, price: 0, lockup: 0, flow: 0, total: 20 },
+    reasons: [],
+    reject_reasons: ['(달력 fixture) 혼합 날짜 REJECT 시연용.'],
+    sources: [{ doc_type: 'REGISTRATION_AMENDED', rcept_no: '20261126000003', rcept_dt: '2026-11-26', url: dartUrl('20261126000003') }],
+    underwriters: [],
+  },
+  [CAL_SORT_PENDING_ID]: {
+    ...summaries.find(s => s.id === CAL_SORT_PENDING_ID)!,
+    indicators: {
+      competition_rate: null, competition_rate_type: null, demand_amount_krw: null,
+      price_position: null,
+      lockup_ratio: null, lockup_ratio_basis: null,
+      tradable_ratio: null, old_share_ratio: null,
+      new_share_count: null, old_share_count: null, total_offering_count: null,
+      offering_amount_krw: null, report_rcept_no: '20261120000004',
+    },
+    scores: { comp: null, price: null, lockup: null, flow: null, total: null },
+    reasons: ['(달력 fixture) 수요예측 전 — 판정 대기.'],
+    reject_reasons: [],
+    sources: [{ doc_type: 'PROSPECTUS', rcept_no: '20261120000004', rcept_dt: '2026-11-20', url: dartUrl('20261120000004') }],
+    underwriters: [],
+  },
+  [CAL_SORT_CORRECTION_ID]: {
+    ...summaries.find(s => s.id === CAL_SORT_CORRECTION_ID)!,
+    indicators: {
+      competition_rate: null, competition_rate_type: null, demand_amount_krw: null,
+      price_position: null,
+      lockup_ratio: null, lockup_ratio_basis: null,
+      tradable_ratio: null, old_share_ratio: null,
+      new_share_count: null, old_share_count: null, total_offering_count: null,
+      offering_amount_krw: null, report_rcept_no: '20261125000005',
+    },
+    scores: { comp: null, price: null, lockup: null, flow: null, total: null },
+    reasons: ['(달력 fixture) 혼합 날짜 CORRECTION — 다른 종목과 함께 있으면 칸에서 숨김.'],
+    reject_reasons: [],
+    sources: [{ doc_type: 'PROSPECTUS', rcept_no: '20261119000005', rcept_dt: '2026-11-19', url: dartUrl('20261119000005') }],
+    underwriters: [],
+  },
+  [CAL_SORT_CORRECTION_ONLY_ID]: {
+    ...summaries.find(s => s.id === CAL_SORT_CORRECTION_ONLY_ID)!,
+    indicators: {
+      competition_rate: null, competition_rate_type: null, demand_amount_krw: null,
+      price_position: null,
+      lockup_ratio: null, lockup_ratio_basis: null,
+      tradable_ratio: null, old_share_ratio: null,
+      new_share_count: null, old_share_count: null, total_offering_count: null,
+      offering_amount_krw: null, report_rcept_no: '20261128000006',
+    },
+    scores: { comp: null, price: null, lockup: null, flow: null, total: null },
+    reasons: ['(달력 fixture) 12/2 CORRECTION 단독 — 그 날짜에 다른 종목이 없으므로 칸에 그대로 노출.'],
+    reject_reasons: [],
+    sources: [
+      { doc_type: 'PROSPECTUS', rcept_no: '20261121000006', rcept_dt: '2026-11-21', url: dartUrl('20261121000006') },
+      { doc_type: 'REGISTRATION_AMENDED', rcept_no: '20261201000006', rcept_dt: '2026-12-01', url: dartUrl('20261201000006') },
+    ],
+    underwriters: [],
   },
 }
 

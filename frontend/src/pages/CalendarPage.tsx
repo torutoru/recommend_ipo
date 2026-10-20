@@ -71,6 +71,22 @@ function buildEventMap(items: IpoSummary[]): Map<string, CalEvent[]> {
 
 const MAX_CHIPS_PER_CELL = 3
 
+// v1.5 — 셀 안 칩 정렬 우선순위 (낮을수록 먼저).
+// 요구: S > A > B > INCOMPLETE > REJECT > PENDING > CORRECTION
+const CHIP_PRIORITY: Record<string, number> = {
+  'PASS-S':     1,
+  'PASS-A':     2,
+  'PASS-B':     3,
+  'INCOMPLETE': 4,
+  'REJECT':     5,
+  'PENDING':    6,
+  'CORRECTION': 7,
+}
+
+function priorityOf(ev: CalEvent): number {
+  return CHIP_PRIORITY[verdictKey(ev.item.verdict)] ?? 999
+}
+
 export function CalendarPage() {
   const [cursor, setCursor] = useState<Date>(() => {
     const now = new Date()
@@ -111,7 +127,10 @@ export function CalendarPage() {
     [filteredItems],
   )
   const grid = useMemo(() => monthGrid(cursor), [cursor])
-  const dayEvents = selectedDay ? eventMap.get(selectedDay) ?? [] : []
+  // 선택 날짜 상세 패널은 CORRECTION 포함 전체 이벤트, 우선순위 정렬.
+  const dayEvents = (selectedDay ? eventMap.get(selectedDay) ?? [] : [])
+    .slice()
+    .sort((a, b) => priorityOf(a) - priorityOf(b))
 
   function goToday() {
     const t = new Date()
@@ -158,7 +177,14 @@ export function CalendarPage() {
             <div className="cal-body">
               {grid.map(cell => {
                 const events = eventMap.get(cell.ymd) ?? []
-                const visible = events.slice(0, MAX_CHIPS_PER_CELL)
+                // v1.5: CORRECTION 은 non-correction 이벤트가 하나라도 있으면 셀에서 숨긴다.
+                // CORRECTION 만 있는 날짜(nonCorrection === 0)는 그대로 노출.
+                const nonCorrection = events.filter(e => e.item.verdict.status !== 'CORRECTION')
+                const chipPool = nonCorrection.length > 0 ? nonCorrection : events
+                // 우선순위 안정 정렬 (Array.prototype.sort 는 안정 — 같은 우선순위면 입력 순서 유지).
+                const sorted = chipPool.slice().sort((a, b) => priorityOf(a) - priorityOf(b))
+                const visible = sorted.slice(0, MAX_CHIPS_PER_CELL)
+                // +N 더보기: CORRECTION 숨김 포함 전체 이벤트 수 기준.
                 const overflow = events.length - visible.length
                 return (
                   <div
