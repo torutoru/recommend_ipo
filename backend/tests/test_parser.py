@@ -573,9 +573,9 @@ def test_extract_offering_counts_rejects_eval_table_금액_label():
         "<P>모집할 증권: 신주모집수량 2,260,000주 (구주매출 없음)</P>"
     )
     res = extract_offering_counts(text)
-    # 금액성 라벨은 거부, 본값만 매치
+    # 금액성 라벨은 거부, 본값만 매치. "구주매출 없음" 서술로 old=0 강제.
     assert res["new"] == 2_260_000, res
-    assert res["old"] is None, res
+    assert res["old"] == 0, res
 
 
 def test_extract_offering_counts_negative_old_dropped():
@@ -627,6 +627,93 @@ def test_parse_pct_comma_as_decimal():
     # 범위 밖은 null
     assert _parse_pct("150,00") is None
     assert _parse_pct("-5") is None
+
+
+# ---------------- 지시 #39: 정정 "정 정 전" 섹션 제거 ----------------
+
+def test_strip_correction_before_removes_정정전_section():
+    """정정 신고서 "정 정 전 … 정 정 후" 레이아웃에서 "정 정 전" 섹션 제거."""
+    from app.parser import _strip_correction_before
+    text = "정 정 전 수요예측기간 2026년 10월 15일 ~ 10월 21일 정 정 후 2026년 10월 28일 ~ 11월 03일"
+    cleaned = _strip_correction_before(text)
+    assert "10월 15일" not in cleaned
+    assert "10월 28일" in cleaned
+
+
+def test_extract_demand_forecast_prefers_정정후():
+    """정정 신고서 — 수요예측기간은 "정 정 후" 쪽 날짜가 반환되어야."""
+    from app.parser import extract_demand_forecast_period
+    text = (
+        "<P>정 정 전 수요예측기간 2026년 10월 15일 ~ 10월 21일 "
+        "정 정 후 수요예측기간 2026년 10월 28일 ~ 11월 03일</P>"
+    )
+    s, e = extract_demand_forecast_period(text)
+    assert s == "2026-10-28"
+    assert e == "2026-11-03"
+
+
+def test_extract_subscription_prefers_정정후():
+    """정정 신고서 — 청약기간은 "정 정 후" 쪽 날짜가 반환되어야.
+
+    `_RE_SUBSCRIPTION` 는 두 날짜 모두 4자리 연도를 요구하므로 두 번째 연도도 명시.
+    """
+    from app.parser import extract_subscription_dates
+    text = (
+        "<P>정 정 전 청약기간 2026년 10월 26일 ~ 2026년 10월 27일 "
+        "정 정 후 청약기간 2026년 11월 06일 ~ 2026년 11월 09일</P>"
+    )
+    s, e = extract_subscription_dates(text)
+    assert s == "2026-11-06"
+    assert e == "2026-11-09"
+
+
+# ---------------- 지시 #39: 씨앤엠 밴드 "희망공모가액인" 어순 ----------------
+
+def test_extract_band_희망공모가액_어순():
+    """씨앤엠 원문 — "희망공모가액인 10,000원~13,000원" (어순 변형) 수용."""
+    from app.parser import extract_band
+    text = "<P>본 공모의 희망공모가액인 10,000원~13,000원 중 공모가 하단에서 결정됩니다.</P>"
+    low, high = extract_band(text)
+    assert low == 10_000
+    assert high == 13_000
+
+
+# ---------------- 지시 #39: 씨앤엠 구주매출 없음 ----------------
+
+def test_extract_offering_counts_구주매출없이_강제():
+    """씨앤엠 — "구주매출 없이 신주 2,950,000주로만 진행" → old=0 강제."""
+    text = (
+        "<P>신주모집수량 2,950,000주 구주매출 없이 "
+        "총 공모 주식 수 2,950,000주로 진행</P>"
+    )
+    res = extract_offering_counts(text)
+    assert res["new"] == 2_950_000
+    assert res["old"] == 0
+    assert res["total"] == 2_950_000
+
+
+# ---------------- 지시 #39: 씨앤엠 유통 — 기존 주주 부분값 skip ----------------
+
+def test_extract_tradable_ratio_skips_기존주주_partial():
+    """씨앤엠 원문 재현 — "기존 주주의 유통가능 물량 N주(공모 후 36.25%)" skip 후
+    "이를 제외한 N주(공모 후 45.75%)는 상장 직후 ... 유통 가능한 물량" 매치.
+    """
+    from app.parser import extract_tradable_ratio
+    text = (
+        "<P>기존 주주의 유통가능 물량 10,676,501주(공모 후 36.25%)는 "
+        "기존 보유분입니다. 이를 제외한 13,473,501주(공모 후 45.75%)는 "
+        "상장 직후 시장에서 유통 가능한 물량입니다.</P>"
+    )
+    assert extract_tradable_ratio(text) == 45.75
+
+
+def test_extract_tradable_ratio_공백_유통가능():
+    """지시 #39 — "유통 가능" (띄어쓰기) 변형 수용."""
+    from app.parser import extract_tradable_ratio
+    text = (
+        "<P>주식수 5,000,000주(23.33%)는 상장 직후 시장에서 유통 가능한 물량입니다.</P>"
+    )
+    assert extract_tradable_ratio(text) == 23.33
 
 
 # ---------- 정확도 보강 #3: 엘리스그룹 확약 — "합 계" COLSPAN 분리 ----------

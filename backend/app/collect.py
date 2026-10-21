@@ -67,7 +67,8 @@ DART_URL = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo="
 #   v19 — 지시 #36 (unchanged_corps 로그 + 강제 재처리 bump — 엘리스 운영 null 재검증)
 #   v20 — 지시 #37 (메인 for 루프 filtered_full 완화 — stale-only 와 동일 — 엘리스 preserved 사고 해소)
 #   v21 — 지시 #38 (신주/구주 라벨 strict + 범위 검증 — 영광 음수 사고 해소 / 유통 쉼표 소수점 수용 — 이에스티)
-PARSER_VERSION = "v21"
+#   v22 — 지시 #39 (정정 "정 정 전" 섹션 제거 + 밴드 어순 변형 + "구주매출 없음" 명시 + 유통 부분값 skip + "유통 가능" 띄어쓰기)
+PARSER_VERSION = "v22"
 
 
 # ---------- 분류 ----------

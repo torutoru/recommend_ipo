@@ -66,6 +66,20 @@ def _strip_tags(s: str) -> str:
     return _RE_SPACE.sub(" ", _RE_TAG.sub(" ", s)).strip()
 
 
+# 지시 #39: 정정 신고서 상단의 "정 정 전 ↔ 정 정 후" 비교표 처리.
+# strip_tags 후 테이블 셀 레이아웃이 flat 하게 되어 "정 정 전 2026-10-15 ~ 10-21 정 정 후 2026-10-28 ~ 11-03"
+# 처럼 섞여 — regex 가 "정 정 전" 쪽 날짜를 먼저 매치한다. 전처리로 그 구간을 제거해 "정 정 후" 쪽만 남긴다.
+# greedy 로 "정 정 전" 뒤 ~ 마지막 "정 정 후" 전까지 전부 매치해 치환.
+_RE_CORRECTION_BEFORE = re.compile(
+    r"정\s*정\s*전[\s\S]{0,2000}(?=정\s*정\s*후)"
+)
+
+
+def _strip_correction_before(text: str) -> str:
+    """정정 신고서 "정 정 전" 섹션 제거. "정 정 후" 가 없으면 원문 유지."""
+    return _RE_CORRECTION_BEFORE.sub(" ", text)
+
+
 def _to_int(s: str) -> Optional[int]:
     try:
         return int(s.replace(",", "").strip())
@@ -83,8 +97,9 @@ def _to_float(s: str) -> Optional[float]:
 # ---------- 밴드 (공모희망가액) ----------
 
 # 두 패턴을 OR: 괄호형(디티에스) 또는 조사형(다비오 "공모희망가액인 12,300원 ~ 16,600원")
+# 지시 #39: 어순 변형 "희망공모가액인 10,000원~13,000원" (씨앤엠) 수용.
 _RE_BAND = re.compile(
-    r"공모희망가액[^0-9가-힣]{0,10}(?:인|범위|\(|\s)*\s*([0-9,]+)\s*원\s*~\s*([0-9,]+)\s*원"
+    r"(?:공모희망가액|희망공모가액)[^0-9가-힣]{0,10}(?:인|범위|\(|\s)*\s*([0-9,]+)\s*원\s*~\s*([0-9,]+)\s*원"
 )
 
 
@@ -209,7 +224,8 @@ _RE_SUBSCRIPTION = re.compile(
 
 
 def extract_subscription_dates(xml: str) -> tuple[Optional[str], Optional[str]]:
-    text = _strip_tags(xml)
+    # 지시 #39: 정정 신고서 "정 정 전" 섹션 제거 — 최신 일정만 매치.
+    text = _strip_correction_before(_strip_tags(xml))
     m = _RE_SUBSCRIPTION.search(text)
     if not m:
         return None, None
@@ -300,29 +316,38 @@ def extract_lockup(xml: str) -> tuple[Optional[float], Optional[Literal["allocat
 # 예2(티앤이코리아): "11,357,737주 중 31.27%에 해당하는 3,551,856주는 상장직후 유통가능 물량에 해당됩니다"
 # → "약" 선택, "유통가능" 뒤 공백 허용.
 # 지시 #38: 숫자 캡처에 쉼표도 허용 — 원문 오타 "37,68%" (이에스티 사례) 수용 후 _parse_pct 가 소수점으로 변환.
+# 지시 #39: "유통가능" / "유통 가능" 띄어쓰기 변형 수용 (씨앤엠 "유통 가능한 물량").
 _RE_TRADABLE_RATIO_NARRATIVE = re.compile(
-    r"(?:약\s*)?([\d.,]+)\s*%\s*에\s*해당하는\s*[\d,]+\s*주[^<]{0,40}유통가능\s*물량"
+    r"(?:약\s*)?([\d.,]+)\s*%\s*에\s*해당하는\s*[\d,]+\s*주[^<]{0,40}유통\s*가능\s*물량"
 )
 
 # 지시 #26: 삼성증권 형식(크리에이츠) — 순서 반전 "N주는 상장 직후 ... 유통가능 ... %"
 _RE_TRADABLE_RATIO_NARRATIVE_INVERTED = re.compile(
-    r"상장\s*직후[^%<]{0,120}?유통가능[^%<]{0,120}?([\d.,]+)\s*%"
+    r"상장\s*직후[^%<]{0,120}?유통\s*가능[^%<]{0,120}?([\d.,]+)\s*%"
 )
 
 # 정확도 보강 (#1): 엠에스바이오 형식 — "주식수 N주(N.NN%)는 상장 직후 시장에서 유통가능한 물량입니다"
+# 지시 #39: 괄호 안에 "공모 후" 같은 라벨이 끼는 포맷(씨앤엠) 수용 — "N주(공모 후 N%)".
 _RE_TRADABLE_RATIO_NARRATIVE_PAREN = re.compile(
-    r"[\d,]+\s*주\s*\(\s*([\d.,]+)\s*%\s*\)[^%<]{0,60}상장\s*직후[^%<]{0,40}유통가능"
+    r"[\d,]+\s*주\s*\(\s*(?:[^0-9%)]{0,20})?([\d.,]+)\s*%\s*\)[^%<]{0,60}상장\s*직후[^%<]{0,40}유통\s*가능"
 )
 
 # 지시 #38: 이에스티 서술 — "상장일 유통가능 물량은 N주(상장일 기준 N,NN%)"
 # "유통가능 물량은" 뒤 N주 + 괄호 안 % 표기. 쉼표가 소수점을 대신하는 오타 수용.
 _RE_TRADABLE_RATIO_NARRATIVE_ESTAT = re.compile(
-    r"상장일\s*유통가능\s*물량[^<%]{0,20}?[\d,]+\s*주\s*\([^%<]{0,30}?([\d.,]+)\s*%\s*\)"
+    r"상장일\s*유통\s*가능\s*물량[^<%]{0,20}?[\d,]+\s*주\s*\([^%<]{0,30}?([\d.,]+)\s*%\s*\)"
 )
 
 # fallback: 테이블 "유통가능물량(A-B)" 라벨 셀 뒤 300자 이내에서 "N.NN%" 매치 (첫 매치).
 _RE_TRADABLE_RATIO_TABLE = re.compile(
-    r"유통가능물량[^가-힣%]{0,300}?([\d]+[.,]?\d+)\s*%"
+    r"유통\s*가능물량[^가-힣%]{0,300}?([\d]+[.,]?\d+)\s*%"
+)
+
+# 지시 #39: 부분값 서술 라벨 — "기존 주주의 유통가능", "상장 전 유통가능", "공모주주 유통가능" 등은
+# 전체 유통 비율이 아니라 부분값(씨앤엠 36.25% = 기존 주주의 유통가능 물량). 매치 window 안에
+# 이런 라벨이 있으면 skip 하고 다음 매치 후보로 넘어간다.
+_RE_PARTIAL_FLOW_HINT = re.compile(
+    r"기존\s*주주|상장\s*전\s*유통|보호예수\s*제외|공모주주\s*유통"
 )
 
 
@@ -356,24 +381,43 @@ def _parse_pct(s: Optional[str]) -> Optional[float]:
     return None
 
 
+def _tradable_match_valid(text: str, m: "re.Match") -> bool:
+    """지시 #39: 매치 **직전 40자** 안에 부분값 라벨 ("기존 주주" 등) 이 있으면 부분값 서술로 간주, False.
+
+    window 를 좁게 잡아 다른 매치 후보의 라벨이 끼지 않게 한다.
+    """
+    s = max(0, m.start() - 40)
+    window = text[s:m.start()]
+    return _RE_PARTIAL_FLOW_HINT.search(window) is None
+
+
+def _first_valid_pct(text: str, pattern: "re.Pattern") -> Optional[float]:
+    """pattern.finditer 로 전수 탐색 — 부분값 라벨 window 는 skip, 첫 유효 매치 반환."""
+    for m in pattern.finditer(text):
+        if _tradable_match_valid(text, m):
+            v = _parse_pct(m.group(1))
+            if v is not None:
+                return v
+    return None
+
+
 def extract_tradable_ratio(xml: str) -> Optional[float]:
-    """상장일 유통가능 비율(%). 서술형(4종) → 테이블 fallback 순."""
+    """상장일 유통가능 비율(%). 서술형(4종) → 테이블 fallback 순.
+
+    지시 #39: 매치 window 안에 "기존 주주" 등 부분값 라벨이 있으면 skip 하고
+    다음 유효 매치를 찾는다. 씨앤엠(36.25% 부분값 → 45.75% 전체) 복구.
+    """
     text = _strip_tags(xml)
-    m = _RE_TRADABLE_RATIO_NARRATIVE.search(text)
-    if m:
-        return _parse_pct(m.group(1))
-    m_paren = _RE_TRADABLE_RATIO_NARRATIVE_PAREN.search(text)
-    if m_paren:
-        return _parse_pct(m_paren.group(1))
-    m_inv = _RE_TRADABLE_RATIO_NARRATIVE_INVERTED.search(text)
-    if m_inv:
-        return _parse_pct(m_inv.group(1))
-    m_estat = _RE_TRADABLE_RATIO_NARRATIVE_ESTAT.search(text)
-    if m_estat:
-        return _parse_pct(m_estat.group(1))
-    m2 = _RE_TRADABLE_RATIO_TABLE.search(text)
-    if m2:
-        return _parse_pct(m2.group(1))
+    for pattern in (
+        _RE_TRADABLE_RATIO_NARRATIVE,
+        _RE_TRADABLE_RATIO_NARRATIVE_PAREN,
+        _RE_TRADABLE_RATIO_NARRATIVE_INVERTED,
+        _RE_TRADABLE_RATIO_NARRATIVE_ESTAT,
+        _RE_TRADABLE_RATIO_TABLE,
+    ):
+        v = _first_valid_pct(text, pattern)
+        if v is not None:
+            return v
     return None
 
 
@@ -479,7 +523,8 @@ def extract_listing_date(xml: str) -> Optional[str]:
     주의: 과거 상장일 참조(예: 모회사 상장일, 기준 시점)가 섞여 들어오므로
     호출자(parse)가 rcept_dt / subscription_end 와 비교해 미래 날짜만 수용한다.
     """
-    text = _strip_tags(xml)
+    # 지시 #39: 정정 신고서 "정 정 전" 섹션 제거.
+    text = _strip_correction_before(_strip_tags(xml))
     m = _RE_LISTING_DATE.search(text)
     if not m:
         return None
@@ -500,7 +545,8 @@ _RE_PRICE_CONFIRM_DATE = re.compile(
 
 def extract_price_confirm_date(xml: str) -> Optional[str]:
     """본문 명시 "공모가액 확정공고 YYYY-MM-DD" 등. 없으면 None."""
-    text = _strip_tags(xml)
+    # 지시 #39: 정정 신고서 "정 정 전" 섹션 제거.
+    text = _strip_correction_before(_strip_tags(xml))
     m = _RE_PRICE_CONFIRM_DATE.search(text)
     if not m:
         return None
@@ -568,7 +614,8 @@ _RE_DEMAND_FORECAST = re.compile(
 
 def extract_demand_forecast_period(xml: str) -> tuple[Optional[str], Optional[str]]:
     """본문 명시 수요예측 시작·종료일. 없으면 (None, None)."""
-    text = _strip_tags(xml)
+    # 지시 #39: 정정 신고서 "정 정 전" 섹션 제거.
+    text = _strip_correction_before(_strip_tags(xml))
     m = _RE_DEMAND_FORECAST.search(text)
     if not m:
         return None, None
@@ -592,6 +639,11 @@ _RE_NEW_SHARES = re.compile(
 _RE_OLD_SHARES = re.compile(
     r"구주\s*매출(?!유입|자금|총액|금액|금)"
     r"(?:\s*(?:수량|주식(?:의)?\s*수))?[^0-9]{0,20}([0-9,]+)\s*주"
+)
+# 지시 #39: 구주매출 없음 서술 — 매치되면 old=0 으로 간주.
+# "구주매출 없이", "구주매출 해당사항 없음", "구주매출 없음".
+_RE_NO_OLD_SHARES = re.compile(
+    r"구주\s*매출\s*(?:없이|없음|해당\s*(?:사항)?\s*없)"
 )
 # 라벨 바로 뒤의 선언형 숫자만 매치. 설명문 안 "공모주식수는..." 같은 조사형은 lookahead 로 차단.
 # 다비오("모집 또는 매출주식의 수" / "기명식 보통주 1,000,000주") 패턴도 추가.
@@ -619,10 +671,14 @@ def extract_offering_counts(xml: str) -> dict:
     """신주·구주·총 공모 주식 수 best-effort. 라벨이 다양해 fail-soft.
 
     지시 #38: 범위 검증을 수행한다 — 음수·total 초과·합 불일치는 추정 금지(null).
+    지시 #39: "구주매출 없이" 등 명시 서술이 있으면 old=0 강제 (regex 오매치 보호).
     """
     text = _strip_tags(xml)
     new = old = total = None
     warnings: list[str] = []
+
+    # 지시 #39: 구주매출 없음 서술 → old=0 (명시 신호 — regex 오매치보다 신뢰도 높음)
+    no_old_hint = bool(_RE_NO_OLD_SHARES.search(text))
 
     mn = _RE_NEW_SHARES.search(text)
     if mn:
@@ -637,6 +693,12 @@ def extract_offering_counts(xml: str) -> dict:
             if g is not None:
                 total = _to_int(g)
                 break
+
+    # 지시 #39: 구주매출 없음 명시 — 기존 regex old 값 폐기, 0 으로 설정
+    if no_old_hint:
+        if old is not None and old != 0:
+            warnings.append(f"구주매출 없음 명시 — regex old({old}) 폐기 → 0")
+        old = 0
 
     # 보완: new+old 가 있고 total 없으면 합산, 반대도 가능
     if total is None and new is not None and old is not None:
