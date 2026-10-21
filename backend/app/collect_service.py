@@ -401,29 +401,10 @@ def _run() -> None:
     )
 
 
-# ---------- 보안: 에러 메시지에서 키·내부 경로 제거 ----------
+# ---------- 보안: 에러 메시지에서 키·내부 경로 제거 (지시 #45 ①: app/security.py 로 공통화) ----------
 
-def _sanitize_error(e: Exception) -> str:
-    return _sanitize_error_text(f"{type(e).__name__}: {e}")
-
-
-def _sanitize_error_text(msg: str) -> str:
-    key = get_settings().dart_cert_key
-    if key:
-        msg = msg.replace(key, "***")
-    collect_key = get_settings().collect_key
-    if collect_key:
-        msg = msg.replace(collect_key, "***")
-    tdb = get_settings().turso_database_url
-    if tdb:
-        msg = msg.replace(tdb, "<turso-url>")
-    tok = get_settings().turso_auth_token
-    if tok:
-        msg = msg.replace(tok, "<turso-token>")
-    import re
-    msg = re.sub(r"[A-Za-z]:[\\/][^\s'\"]+", "<path>", msg)
-    msg = re.sub(r"/[^\s'\"]*/[^\s'\"]+", "<path>", msg)
-    return msg[:300]
+from .security import mask_exception as _sanitize_error  # noqa: E402
+from .security import mask_secrets as _sanitize_error_text  # noqa: E402
 
 
 # 테스트용 리셋

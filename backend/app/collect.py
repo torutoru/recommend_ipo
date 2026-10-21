@@ -28,6 +28,7 @@ import httpx
 from .config import BACKEND_DIR, get_settings
 from . import dart_client  # 테스트 격리 위해 모듈 참조 (`dart_client.download_document_zip` 로 호출)
 from .parser import parse
+from .security import mask_secrets as _mask  # 지시 #45 ①: 모든 외부 노출 문자열에 적용
 from .store import (
     connect,
     finish_collect_run,
@@ -70,7 +71,8 @@ DART_URL = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo="
 #   v22 — 지시 #39 (정정 "정 정 전" 섹션 제거 + 밴드 어순 변형 + "구주매출 없음" 명시 + 유통 부분값 skip + "유통 가능" 띄어쓰기)
 #   v23 — 지시 #40+#41 (아델 가정 확정가 거부 + 정정 블록 상한 제거 + flow 한쪽 조건 NOT_MET)
 #   v24 — 지시 #42 (정정 신고서 서두 정정표 skip — "대표이사 등의 확인" 이후 본문에서만 일정·밴드 추출)
-PARSER_VERSION = "v24"
+#   v25 — 지시 #43 (final_price 저장 조건부 COALESCE — competition_rate 미공시면 excluded 교체, 아델 오파싱 보존 해소)
+PARSER_VERSION = "v25"
 
 
 # ---------- 분류 ----------
@@ -414,7 +416,7 @@ def process_corp(
             zip_bytes = get_document_zip_cached(rcept_no)
             xml_bytes = extract_single_xml(zip_bytes)
         except Exception as e:
-            download_error = f"원문 다운로드/압축해제 실패({rcept_no}): {type(e).__name__}: {e}"
+            download_error = _mask(f"원문 다운로드/압축해제 실패({rcept_no}): {type(e).__name__}: {e}")
             parsed_warnings.append(download_error)
 
         if xml_bytes is None:
@@ -498,7 +500,7 @@ def process_corp(
                 estk_resp = dart_client.get_estk_rs(corp_code=corp_code, bgn_de=bgn_de, end_de=end_de)
                 estk_names = _extract_underwriters_from_estk_rs(estk_resp)
         except Exception as e:
-            parsed_warnings.append(f"estkRs 교차검증 호출 실패: {type(e).__name__}: {e}")
+            parsed_warnings.append(_mask(f"estkRs 교차검증 호출 실패: {type(e).__name__}: {e}"))
         if estk_names:
             seen = set(combined)
             for name in estk_names:
@@ -584,7 +586,7 @@ def _supplement_from_issuance_report(
         xml_bytes = extract_single_xml(zip_bytes)
     except Exception as e:
         parsed_warnings.append(
-            f"ISSUANCE_REPORT({issue_rcept}) 보강 다운로드/압축해제 실패: {type(e).__name__}: {e}"
+            _mask(f"ISSUANCE_REPORT({issue_rcept}) 보강 다운로드/압축해제 실패: {type(e).__name__}: {e}")
         )
         return
     try:
@@ -596,7 +598,7 @@ def _supplement_from_issuance_report(
         )
     except Exception as e:
         parsed_warnings.append(
-            f"ISSUANCE_REPORT({issue_rcept}) 보강 파싱 실패: {type(e).__name__}: {e}"
+            _mask(f"ISSUANCE_REPORT({issue_rcept}) 보강 파싱 실패: {type(e).__name__}: {e}")
         )
         return
     changed: list[str] = []
@@ -699,7 +701,7 @@ def _supplement_from_prospectus(
         xml_bytes = extract_single_xml(zip_bytes)
     except Exception as e:
         parsed_warnings.append(
-            f"PROSPECTUS({pros_rcept}) 보강 다운로드/압축해제 실패: {type(e).__name__}: {e}"
+            _mask(f"PROSPECTUS({pros_rcept}) 보강 다운로드/압축해제 실패: {type(e).__name__}: {e}")
         )
         return
     try:
@@ -711,7 +713,7 @@ def _supplement_from_prospectus(
         )
     except Exception as e:
         parsed_warnings.append(
-            f"PROSPECTUS({pros_rcept}) 보강 파싱 실패: {type(e).__name__}: {e}"
+            _mask(f"PROSPECTUS({pros_rcept}) 보강 파싱 실패: {type(e).__name__}: {e}")
         )
         return
     changed: list[str] = []
@@ -763,7 +765,7 @@ def run(days: int, *, verbose: bool = True) -> dict:
                 )
         except Exception as e:
             errors += 1
-            log.append(f"[ERR] {corp_code}: {type(e).__name__}: {e}")
+            log.append(_mask(f"[ERR] {corp_code}: {type(e).__name__}: {e}"))
 
     collected = sum(1 for r in results if r.get("status") == "collected")
 
@@ -794,10 +796,10 @@ def main(argv: Optional[list[str]] = None) -> int:
     try:
         run(ns.days, verbose=not ns.quiet)
     except httpx.HTTPError as e:
-        print(f"[FATAL] HTTP 오류: {e}", file=sys.stderr)
+        print(_mask(f"[FATAL] HTTP 오류: {e}"), file=sys.stderr)
         return 2
     except RuntimeError as e:
-        print(f"[FATAL] {e}", file=sys.stderr)
+        print(_mask(f"[FATAL] {e}"), file=sys.stderr)
         return 1
     return 0
 

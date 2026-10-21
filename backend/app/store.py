@@ -204,7 +204,14 @@ def upsert_ipo(
             listing_date          = COALESCE(excluded.listing_date, ipos.listing_date),
             band_low              = COALESCE(excluded.band_low, ipos.band_low),
             band_high             = COALESCE(excluded.band_high, ipos.band_high),
-            final_price           = COALESCE(excluded.final_price, ipos.final_price),
+            -- 지시 #43: final_price 는 수요예측 결과와 한 묶음. competition_rate 가 새·기존 모두
+            -- null 이면(수요예측 결과 미공시 상태) final_price 도 excluded 값(null 포함)으로 교체.
+            -- 과거 오파싱 값(아델 가정문 '23,445원 이상')이 COALESCE 로 영구 보존되는 사고 방지.
+            final_price           = CASE
+                WHEN COALESCE(excluded.competition_rate, ipos.competition_rate) IS NULL
+                THEN excluded.final_price
+                ELSE COALESCE(excluded.final_price, ipos.final_price)
+            END,
             -- 지시 #29: price_position 은 final_price + band 로부터 파생 → **excluded 교체**(null 포함)
             price_position        = excluded.price_position,
             competition_rate      = COALESCE(excluded.competition_rate, ipos.competition_rate),
@@ -271,6 +278,32 @@ def replace_warnings(
         "INSERT INTO parse_warnings (corp_code, seq, message) VALUES (?,?,?)",
         [(corp_code, i, w) for i, w in enumerate(warnings)],
     )
+
+
+def mask_crtfc_key_in_warnings(path: Optional[Path] = None) -> int:
+    """지시 #45 ①: parse_warnings 에 저장된 메시지 중 `crtfc_key=…` 패턴을
+    `crtfc_key=***` 로 UPDATE 마스킹. 반환값은 마스킹된 행 수.
+
+    과거 라운드에서 httpx.HTTPStatusError 메시지 전체가 DB 에 들어갔을 가능성에 대비한
+    재발 방지 패치. **값 자체는 로그에 출력하지 않는다**.
+    """
+    import re as _re
+    pattern = _re.compile(r"crtfc_key=[A-Za-z0-9]+")
+    count = 0
+    with connect(path) as conn:
+        rows = conn.execute(
+            "SELECT corp_code, seq, message FROM parse_warnings "
+            "WHERE message LIKE '%crtfc_key=%'"
+        ).fetchall()
+        for row in rows:
+            new_msg = pattern.sub("crtfc_key=***", row["message"])
+            if new_msg != row["message"]:
+                conn.execute(
+                    "UPDATE parse_warnings SET message=? WHERE corp_code=? AND seq=?",
+                    (new_msg, row["corp_code"], row["seq"]),
+                )
+                count += 1
+    return count
 
 
 def known_rcept_nos(conn: sqlite3.Connection) -> set[str]:

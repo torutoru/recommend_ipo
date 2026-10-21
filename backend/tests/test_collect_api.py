@@ -329,6 +329,135 @@ def test_download_failure_does_not_overwrite_existing(client, monkeypatch, tmp_p
     assert after["final_price"] == before["final_price"]
 
 
+def _upsert(conn, **kw):
+    """지시 #43 테스트 헬퍼 — upsert_ipo 호출 전 null 기본값 채움."""
+    defaults = dict(
+        corp_name="테스트", market=None,
+        subscription_start=None, subscription_end=None, listing_date=None,
+        band_low=None, band_high=None, final_price=None, price_position=None,
+        competition_rate=None, competition_rate_type=None,
+        demand_quantity=None, demand_amount_krw=None,
+        lockup_ratio=None, lockup_ratio_basis=None,
+        tradable_ratio=None, old_share_ratio=None,
+        new_share_count=None, old_share_count=None,
+        total_offering_count=None, offering_amount_krw=None,
+        report_rcept_no=None, parser_version=None, price_confirm_date=None,
+        demand_forecast_start=None, demand_forecast_end=None,
+        correction_requested_at=None, correction_amended_at=None,
+        underwriters_json=None,
+    )
+    defaults.update(kw)
+    store.upsert_ipo(conn, **defaults)
+
+
+def test_43_final_price_cleared_when_competition_rate_null(client):
+    """지시 #43 — competition_rate 가 새·기존 모두 null 이면 final_price 도 excluded 값(null)으로 교체.
+
+    아델 사례(가정문 23,445원 오파싱 → v24 parser 는 null 반환이지만 COALESCE 로 영구 보존되던 사고).
+    """
+    # 1회차: 과거 오파싱 상태 재현 — final_price=23445, competition_rate=None
+    with store.connect() as conn:
+        _upsert(conn, corp_code="01938746", corp_name="아델", market="KOSDAQ",
+                final_price=23445, report_rcept_no="20261012000445", parser_version="v23")
+    before = client.get("/api/ipos/01938746").json()
+    assert before["final_price"] == 23445
+
+    # 2회차: v25 parser 는 가정문을 거부하여 final_price=None, competition_rate 는 여전히 null
+    with store.connect() as conn:
+        _upsert(conn, corp_code="01938746", corp_name="아델", market="KOSDAQ",
+                report_rcept_no="20261012000445", parser_version="v25")
+    after = client.get("/api/ipos/01938746").json()
+    # 수요예측 결과 null → final_price 도 excluded(null) 로 교체되어야
+    assert after["final_price"] is None
+    assert after["indicators"]["price_position"] is None
+    assert after["indicators"]["offering_amount_krw"] is None
+
+
+def test_43_final_price_preserved_when_competition_rate_present(client):
+    """지시 #43 — competition_rate 가 있으면 (수요예측 완료 상태) 기존 final_price 는 COALESCE 로 보존.
+
+    데이터 보호 규칙 유지 — 다운로드·파싱 일시 실패에도 확정가 지워지지 않음.
+    """
+    # 1회차: 정상 — competition_rate 와 final_price 모두 있음
+    with store.connect() as conn:
+        _upsert(conn, corp_code="99999999", corp_name="테스트", market="KOSDAQ",
+                band_low=10000, band_high=15000, final_price=15000, price_position="TOP_OF_BAND",
+                competition_rate=2000.0, competition_rate_type="weighted",
+                demand_quantity=1000000, demand_amount_krw=15_000_000_000,
+                lockup_ratio=40.0, lockup_ratio_basis="allocated",
+                tradable_ratio=25.0, old_share_ratio=0.0,
+                new_share_count=1000000, old_share_count=0,
+                total_offering_count=1000000, offering_amount_krw=15_000_000_000,
+                report_rcept_no="20261020000001", parser_version="v24",
+                price_confirm_date="2026-10-20")
+    # 2회차: parser 가 일시적 null — competition_rate 기존 보존 → CASE else 분기 → final_price COALESCE 보존
+    with store.connect() as conn:
+        _upsert(conn, corp_code="99999999", corp_name="테스트", market="KOSDAQ",
+                report_rcept_no="20261020000001", parser_version="v25")
+    after = client.get("/api/ipos/99999999").json()
+    assert after["final_price"] == 15000
+    assert after["indicators"]["competition_rate"] == 2000.0
+
+
+def test_45_crtfc_key_masked_in_parse_warnings_startup(client):
+    """지시 #45 ① — 기동 시 parse_warnings 에 저장된 crtfc_key=값 패턴이 UPDATE 마스킹됨.
+
+    과거 라운드 httpx.HTTPStatusError 메시지가 그대로 들어간 상태를 재현한 뒤
+    create_app() 재호출 시 마스킹 로직이 동작해 값이 지워짐을 검증.
+    """
+    from app import store
+    # 과거 상태 — crtfc_key 값이 그대로 들어간 메시지 삽입
+    with store.connect() as conn:
+        _upsert(conn, corp_code="12345678", corp_name="테스트")
+        store.replace_warnings(conn, "12345678", [
+            "estkRs 교차검증 호출 실패: HTTPStatusError: 400 Bad Request "
+            "url='https://opendart.fss.or.kr/api/estkRs.json?crtfc_key=ABCDEF123456789&corp_code=12345678'",
+            "다른 경고(비밀값 없음)",
+        ])
+    # 재기동 (create_app 안의 마스킹 호출)
+    from app.main import create_app
+    create_app()
+    # 확인
+    with store.connect() as conn:
+        rows = conn.execute(
+            "SELECT message FROM parse_warnings WHERE corp_code='12345678' ORDER BY seq"
+        ).fetchall()
+    assert len(rows) == 2
+    assert "ABCDEF123456789" not in rows[0]["message"]
+    assert "crtfc_key=***" in rows[0]["message"]
+    # 비밀값 없는 메시지는 그대로
+    assert rows[1]["message"] == "다른 경고(비밀값 없음)"
+
+
+def test_45_mask_secrets_strips_crtfc_key_pattern():
+    """지시 #45 ① — mask_secrets 는 설정 키가 없어도 crtfc_key=… 패턴을 치환."""
+    from app.security import mask_secrets
+    msg = "https://opendart.fss.or.kr/api/list.json?crtfc_key=TOPSECRET&corp_code=12345678"
+    result = mask_secrets(msg)
+    assert "TOPSECRET" not in result
+    assert "crtfc_key=***" in result
+
+
+def test_45_dart_client_raise_sanitized_no_url_in_exception(monkeypatch):
+    """지시 #45 ① — _raise_sanitized 는 상태 코드·엔드포인트명만 담은 예외 재발생.
+
+    httpx.HTTPStatusError 가 던지는 URL 포함 메시지를 사용하지 않음을 검증.
+    """
+    from app import dart_client
+
+    class _FakeResp:
+        status_code = 400
+
+    import pytest as _pytest
+    with _pytest.raises(RuntimeError) as excinfo:
+        dart_client._raise_sanitized(_FakeResp(), "list.json")
+    msg = str(excinfo.value)
+    assert "crtfc_key" not in msg
+    assert "opendart.fss.or.kr" not in msg
+    assert "list.json" in msg
+    assert "400" in msg
+
+
 def test_failures_reason_sanitized_of_secrets(client, monkeypatch, tmp_path):
     """실패 사유에 TURSO/DART 토큰·내부 경로 노출 금지."""
     from app import collect as collect_mod, dart_client

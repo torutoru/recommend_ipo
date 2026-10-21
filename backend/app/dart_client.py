@@ -39,6 +39,17 @@ def _key() -> str:
     return key
 
 
+# 지시 #45 ①: `r.raise_for_status()` 가 던지는 httpx.HTTPStatusError 메시지에는 전체 URL
+# (crtfc_key 포함) 이 들어가 로그·parse_warnings 테이블로 흘러나올 수 있다. URL 없이
+# 상태 코드 + 엔드포인트명만 담은 예외로 재발생.
+def _raise_sanitized(r: httpx.Response, endpoint: str) -> None:
+    status = getattr(r, "status_code", 200)
+    if 200 <= status < 400:
+        return
+    # 응답 본문도 비밀값을 담을 수 있어 상태 코드만 노출
+    raise RuntimeError(f"OpenDART {endpoint} HTTP {status}")
+
+
 def list_disclosures(
     *,
     bgn_de: str,
@@ -69,7 +80,7 @@ def list_disclosures(
     if corp_code:
         params["corp_code"] = corp_code
     r = httpx.get(f"{DART_API}/list.json", params=params, timeout=timeout)
-    r.raise_for_status()
+    _raise_sanitized(r, "list.json")
     return r.json()
 
 
@@ -95,7 +106,7 @@ def get_estk_rs(
         },
         timeout=timeout,
     )
-    r.raise_for_status()
+    _raise_sanitized(r, "estkRs.json")
     return r.json()
 
 
@@ -125,13 +136,14 @@ def download_document_zip(
                 params={"crtfc_key": _key(), "rcept_no": rcept_no},
                 timeout=timeout,
             )
-            r.raise_for_status()
+            _raise_sanitized(r, "document.xml")
             data = r.content
             if data.startswith(_ZIP_MAGIC):
                 return data
             # ZIP 아님 — status 014 등 JSON/XML 응답. 재시도.
             last_err = f"응답이 ZIP 아님(attempt {attempt}, 크기 {len(data)}B)"
-        except httpx.HTTPError as e:
+        except (httpx.HTTPError, RuntimeError) as e:
+            # RuntimeError 는 _raise_sanitized 가 던지는 URL 없는 예외
             last_err = f"HTTP {type(e).__name__}(attempt {attempt})"
         if attempt < retries:
             import time as _time
