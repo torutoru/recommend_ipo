@@ -497,10 +497,19 @@ def build_checklist(
     ))
 
     # 4) flow
+    # 지시 #40 (다비오): 한쪽 조건만으로 NOT_MET 이 확정되면 UNKNOWN 대신 NOT_MET 반환.
+    # 유통 > max → 무조건 NOT_MET (구주 null 과 무관)
+    # 구주 >= lt  → 무조건 NOT_MET (유통 null 과 무관)
     fl_actual = _fmt_flow(ind)
-    if ind.tradable_ratio is None or ind.old_share_ratio is None:
+    tr = ind.tradable_ratio
+    os_ratio = ind.old_share_ratio
+    if tr is not None and tr > cl.flow_tradable_max:
+        fl_result = "NOT_MET"
+    elif os_ratio is not None and os_ratio >= cl.flow_old_share_lt:
+        fl_result = "NOT_MET"
+    elif tr is None or os_ratio is None:
         fl_result = "UNKNOWN"
-    elif ind.tradable_ratio <= cl.flow_tradable_max and ind.old_share_ratio < cl.flow_old_share_lt:
+    elif tr <= cl.flow_tradable_max and os_ratio < cl.flow_old_share_lt:
         fl_result = "MET"
     else:
         fl_result = "NOT_MET"

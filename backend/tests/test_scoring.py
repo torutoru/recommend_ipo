@@ -541,6 +541,26 @@ def test_checklist_unknown_when_values_null(cfg):
         assert by_key[k].actual is None
 
 
+def test_checklist_flow_not_met_by_tradable_gt_even_if_old_null(cfg):
+    """지시 #40: 유통>max → old null 이어도 NOT_MET 확정 (한쪽만으로 결정)."""
+    cl = build_checklist(_ind(tradable_ratio=38.88, old_share_ratio=None), cfg)
+    assert next(c for c in cl if c.key == "flow").result == "NOT_MET"
+
+
+def test_checklist_flow_not_met_by_old_gte_even_if_tradable_null(cfg):
+    """지시 #40: 구주≥lt → 유통 null 이어도 NOT_MET 확정."""
+    cl = build_checklist(_ind(tradable_ratio=None, old_share_ratio=35.0), cfg)
+    assert next(c for c in cl if c.key == "flow").result == "NOT_MET"
+
+
+def test_checklist_flow_unknown_when_one_null_other_passing(cfg):
+    """양호한 쪽만 있고 다른쪽 null → UNKNOWN (결과 확정 불가)."""
+    cl = build_checklist(_ind(tradable_ratio=20.0, old_share_ratio=None), cfg)
+    assert next(c for c in cl if c.key == "flow").result == "UNKNOWN"
+    cl2 = build_checklist(_ind(tradable_ratio=None, old_share_ratio=10.0), cfg)
+    assert next(c for c in cl2 if c.key == "flow").result == "UNKNOWN"
+
+
 def test_checklist_flow_strict_less_than_30(cfg):
     """requirements 9장 확인 — flow MET 조건은 old_share < 30 (strict '<', equal 포함 안 함)."""
     cl = build_checklist(_ind(tradable_ratio=20.0, old_share_ratio=30.0), cfg)

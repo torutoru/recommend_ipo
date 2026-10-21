@@ -68,7 +68,9 @@ DART_URL = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo="
 #   v20 — 지시 #37 (메인 for 루프 filtered_full 완화 — stale-only 와 동일 — 엘리스 preserved 사고 해소)
 #   v21 — 지시 #38 (신주/구주 라벨 strict + 범위 검증 — 영광 음수 사고 해소 / 유통 쉼표 소수점 수용 — 이에스티)
 #   v22 — 지시 #39 (정정 "정 정 전" 섹션 제거 + 밴드 어순 변형 + "구주매출 없음" 명시 + 유통 부분값 skip + "유통 가능" 띄어쓰기)
-PARSER_VERSION = "v22"
+#   v23 — 지시 #40+#41 (아델 가정 확정가 거부 + 정정 블록 상한 제거 + flow 한쪽 조건 NOT_MET)
+#   v24 — 지시 #42 (정정 신고서 서두 정정표 skip — "대표이사 등의 확인" 이후 본문에서만 일정·밴드 추출)
+PARSER_VERSION = "v24"
 
 
 # ---------- 분류 ----------

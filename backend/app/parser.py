@@ -66,18 +66,23 @@ def _strip_tags(s: str) -> str:
     return _RE_SPACE.sub(" ", _RE_TAG.sub(" ", s)).strip()
 
 
-# 지시 #39: 정정 신고서 상단의 "정 정 전 ↔ 정 정 후" 비교표 처리.
-# strip_tags 후 테이블 셀 레이아웃이 flat 하게 되어 "정 정 전 2026-10-15 ~ 10-21 정 정 후 2026-10-28 ~ 11-03"
-# 처럼 섞여 — regex 가 "정 정 전" 쪽 날짜를 먼저 매치한다. 전처리로 그 구간을 제거해 "정 정 후" 쪽만 남긴다.
-# greedy 로 "정 정 전" 뒤 ~ 마지막 "정 정 후" 전까지 전부 매치해 치환.
-_RE_CORRECTION_BEFORE = re.compile(
-    r"정\s*정\s*전[\s\S]{0,2000}(?=정\s*정\s*후)"
-)
+# 지시 #42: 정정 신고서는 서두 정정표(약 2.5만 자) 안에 '정정전'/'정정후' 블록이 번갈아 나와
+# "정정전 섹션만 제거" 방식(v22 greedy·v23 non-greedy 모두)으로는 안정적으로 분리 불가.
+# **"대표이사 등의 확인" 첫 등장 이후 = 본문** — 본문에만 새 일정이 있음(pm 실측).
+# 비정정 문서는 마커가 없거나 처음에 등장하므로 전체 텍스트 사용.
+_RE_BODY_MARKER = re.compile(r"대표이사\s*등의\s*확인")
 
 
-def _strip_correction_before(text: str) -> str:
-    """정정 신고서 "정 정 전" 섹션 제거. "정 정 후" 가 없으면 원문 유지."""
-    return _RE_CORRECTION_BEFORE.sub(" ", text)
+def _extract_body_text(text: str) -> str:
+    """정정 신고서 서두 정정표를 skip 하고 본문만 반환.
+
+    "대표이사 등의 확인" 첫 등장 이후 = 본문(새 일정만 포함).
+    마커가 없으면 원문 전체 유지(비정정 문서).
+    """
+    m = _RE_BODY_MARKER.search(text)
+    if m:
+        return text[m.end():]
+    return text
 
 
 def _to_int(s: str) -> Optional[int]:
@@ -104,8 +109,11 @@ _RE_BAND = re.compile(
 
 
 def extract_band(xml: str) -> tuple[Optional[int], Optional[int]]:
-    """공모희망가액 (low, high) 추출. 못 뽑으면 (None, None)."""
-    text = _strip_tags(xml)
+    """공모희망가액 (low, high) 추출. 못 뽑으면 (None, None).
+
+    지시 #42: 정정 신고서 서두 정정표는 제외하고 본문에서만 추출.
+    """
+    text = _extract_body_text(_strip_tags(xml))
     m = _RE_BAND.search(text)
     if not m:
         return None, None
@@ -120,14 +128,26 @@ _RE_FINAL_PRICE_PATTERNS = [
     re.compile(r"확정\s*공모가\s*:\s*([0-9,]+)\s*원"),
 ]
 
+# 지시 #40 (아델): "확정공모가액이 N원 이상으로 결정되어 … 경우" 같은 **가정·조건 문장**은 제외.
+# 매치된 "N원" 바로 뒤 20자 안에 아래 접미가 오면 조건문으로 간주하고 skip.
+_RE_FINAL_PRICE_ASSUMPTION_SUFFIX = re.compile(
+    r"\s*(?:이상|이하|미만|초과|경우|되어|되는|이라면|이라고|기준으로\s*(?:산정|계산))"
+)
+
 
 def extract_final_price(xml: str) -> Optional[int]:
-    """`[발행조건확정]` 공시 안의 확정공모가액. 결정 전 공시엔 없음."""
+    """`[발행조건확정]` 공시 안의 확정공모가액. 결정 전 공시엔 없음.
+
+    지시 #40: 조건문 "확정공모가액이 N원 이상으로 결정되어 … 경우" 는 가정 서술이므로 제외한다
+    (아델 사례 — 상장주선인 의무보유 주석의 가정문을 확정가로 오인).
+    """
     text = _strip_tags(xml)
-    # 최상위 매치만 (가장 먼저 나오는 명시적 선언 사용)
     for pat in _RE_FINAL_PRICE_PATTERNS:
-        m = pat.search(text)
-        if m:
+        # finditer 로 전수 탐색 — 가정문 접미사 window 검사 후 유효한 매치만 수용
+        for m in pat.finditer(text):
+            tail = text[m.end():m.end() + 20]
+            if _RE_FINAL_PRICE_ASSUMPTION_SUFFIX.match(tail):
+                continue  # 가정·조건문 — skip
             return _to_int(m.group(1))
     return None
 
@@ -225,7 +245,7 @@ _RE_SUBSCRIPTION = re.compile(
 
 def extract_subscription_dates(xml: str) -> tuple[Optional[str], Optional[str]]:
     # 지시 #39: 정정 신고서 "정 정 전" 섹션 제거 — 최신 일정만 매치.
-    text = _strip_correction_before(_strip_tags(xml))
+    text = _extract_body_text(_strip_tags(xml))
     m = _RE_SUBSCRIPTION.search(text)
     if not m:
         return None, None
@@ -524,7 +544,7 @@ def extract_listing_date(xml: str) -> Optional[str]:
     호출자(parse)가 rcept_dt / subscription_end 와 비교해 미래 날짜만 수용한다.
     """
     # 지시 #39: 정정 신고서 "정 정 전" 섹션 제거.
-    text = _strip_correction_before(_strip_tags(xml))
+    text = _extract_body_text(_strip_tags(xml))
     m = _RE_LISTING_DATE.search(text)
     if not m:
         return None
@@ -546,7 +566,7 @@ _RE_PRICE_CONFIRM_DATE = re.compile(
 def extract_price_confirm_date(xml: str) -> Optional[str]:
     """본문 명시 "공모가액 확정공고 YYYY-MM-DD" 등. 없으면 None."""
     # 지시 #39: 정정 신고서 "정 정 전" 섹션 제거.
-    text = _strip_correction_before(_strip_tags(xml))
+    text = _extract_body_text(_strip_tags(xml))
     m = _RE_PRICE_CONFIRM_DATE.search(text)
     if not m:
         return None
@@ -615,7 +635,7 @@ _RE_DEMAND_FORECAST = re.compile(
 def extract_demand_forecast_period(xml: str) -> tuple[Optional[str], Optional[str]]:
     """본문 명시 수요예측 시작·종료일. 없으면 (None, None)."""
     # 지시 #39: 정정 신고서 "정 정 전" 섹션 제거.
-    text = _strip_correction_before(_strip_tags(xml))
+    text = _extract_body_text(_strip_tags(xml))
     m = _RE_DEMAND_FORECAST.search(text)
     if not m:
         return None, None

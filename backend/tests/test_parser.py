@@ -629,38 +629,49 @@ def test_parse_pct_comma_as_decimal():
     assert _parse_pct("-5") is None
 
 
-# ---------------- 지시 #39: 정정 "정 정 전" 섹션 제거 ----------------
+# ---------------- 지시 #42: 정정 신고서 "대표이사 등의 확인" 본문 추출 ----------------
 
-def test_strip_correction_before_removes_정정전_section():
-    """정정 신고서 "정 정 전 … 정 정 후" 레이아웃에서 "정 정 전" 섹션 제거."""
-    from app.parser import _strip_correction_before
-    text = "정 정 전 수요예측기간 2026년 10월 15일 ~ 10월 21일 정 정 후 2026년 10월 28일 ~ 11월 03일"
-    cleaned = _strip_correction_before(text)
-    assert "10월 15일" not in cleaned
-    assert "10월 28일" in cleaned
+def test_extract_body_text_marker_present():
+    """정정 신고서 — "대표이사 등의 확인" 이후만 반환."""
+    from app.parser import _extract_body_text
+    text = (
+        "서두 정정표: 정정전 수요예측 2026년 10월 15일 정정후 2026년 10월 28일 "
+        "대표이사 등의 확인 본문: 수요예측 2026년 10월 28일 ~ 11월 03일"
+    )
+    body = _extract_body_text(text)
+    assert "서두 정정표" not in body
+    assert "본문:" in body
 
 
-def test_extract_demand_forecast_prefers_정정후():
-    """정정 신고서 — 수요예측기간은 "정 정 후" 쪽 날짜가 반환되어야."""
+def test_extract_body_text_no_marker_pass_through():
+    """비정정 문서 — 마커 없으면 원문 전체 반환."""
+    from app.parser import _extract_body_text
+    text = "수요예측 2026년 10월 15일 ~ 10월 21일"
+    assert _extract_body_text(text) == text
+
+
+def test_extract_demand_forecast_body_only():
+    """정정 신고서 — "대표이사 등의 확인" 이전 서두 정정표의 옛 날짜는 무시."""
     from app.parser import extract_demand_forecast_period
     text = (
-        "<P>정 정 전 수요예측기간 2026년 10월 15일 ~ 10월 21일 "
-        "정 정 후 수요예측기간 2026년 10월 28일 ~ 11월 03일</P>"
+        "<P>정정전 수요예측기간 2026년 10월 15일 ~ 10월 21일 "
+        "정정후 수요예측기간 2026년 10월 28일 ~ 11월 03일 "
+        "대표이사 등의 확인 "
+        "수요예측기간 2026년 10월 28일 ~ 2026년 11월 03일</P>"
     )
     s, e = extract_demand_forecast_period(text)
     assert s == "2026-10-28"
     assert e == "2026-11-03"
 
 
-def test_extract_subscription_prefers_정정후():
-    """정정 신고서 — 청약기간은 "정 정 후" 쪽 날짜가 반환되어야.
-
-    `_RE_SUBSCRIPTION` 는 두 날짜 모두 4자리 연도를 요구하므로 두 번째 연도도 명시.
-    """
+def test_extract_subscription_body_only():
+    """정정 신고서 — 본문의 새 청약 날짜만 반환."""
     from app.parser import extract_subscription_dates
     text = (
-        "<P>정 정 전 청약기간 2026년 10월 26일 ~ 2026년 10월 27일 "
-        "정 정 후 청약기간 2026년 11월 06일 ~ 2026년 11월 09일</P>"
+        "<P>정정전 청약기간 2026년 10월 26일 ~ 2026년 10월 27일 "
+        "정정후 청약기간 2026년 11월 06일 ~ 2026년 11월 09일 "
+        "대표이사 등의 확인 "
+        "청약기간 2026년 11월 06일 ~ 2026년 11월 09일</P>"
     )
     s, e = extract_subscription_dates(text)
     assert s == "2026-11-06"
@@ -714,6 +725,128 @@ def test_extract_tradable_ratio_공백_유통가능():
         "<P>주식수 5,000,000주(23.33%)는 상장 직후 시장에서 유통 가능한 물량입니다.</P>"
     )
     assert extract_tradable_ratio(text) == 23.33
+
+
+# ---------------- 지시 #40: 아델 — "확정공모가액이 N원 이상 … 경우" 가정문 거부 ----------------
+
+def test_extract_final_price_rejects_가정문():
+    """아델 원문 — "확정공모가액이 23,445원 이상으로 결정되어 … 경우" 는 가정문. null."""
+    from app.parser import extract_final_price
+    text = (
+        "<P>상장주선인은 확정공모가액이 23,445원 이상으로 결정되어 "
+        "괴리율이 100분의 30 이상이 되는 경우 의무보유를 추가로 확약합니다.</P>"
+    )
+    assert extract_final_price(text) is None
+
+
+def test_extract_final_price_accepts_확정서술():
+    """"확정공모가액은 15,000원으로 결정" 같은 확정 서술은 수용."""
+    from app.parser import extract_final_price
+    text = "<P>확정공모가액은 15,000원으로 결정되었습니다.</P>"
+    assert extract_final_price(text) == 15_000
+
+
+def test_extract_final_price_가정문_뒤_확정문_선택():
+    """같은 원문에 가정문과 확정문이 공존하면 확정문 선택."""
+    from app.parser import extract_final_price
+    text = (
+        "<P>확정공모가액이 23,445원 이상으로 결정되어 괴리율이 발생하는 경우 … "
+        "확정공모가액은 15,000원으로 결정되었습니다.</P>"
+    )
+    assert extract_final_price(text) == 15_000
+
+
+# ---------------- 지시 #42: 실제 원문 캐시 회귀 fixture (daily-check) ----------------
+
+import pytest  # noqa: E402  (파일 상단에 이미 import 되었다면 중복이지만 harmless)
+from pathlib import Path  # noqa: E402
+
+CACHE_DIR = (
+    Path(__file__).resolve().parent.parent.parent
+    / ".claude" / "co-work" / "daily-check" / "cache"
+)
+
+
+def _load_cached(rcept_no: str) -> str:
+    return (CACHE_DIR / f"{rcept_no}.txt").read_text(encoding="utf-8")
+
+
+@pytest.mark.skipif(not CACHE_DIR.exists(), reason="daily-check 캐시 없음")
+class TestRealCorpus:
+    """지시 #42: pm 이 제공한 실제 원문 캐시 fixture 로 회귀 고정.
+
+    daily-check/cache/ 는 태그 제거된 DART 원문. 키·개인정보 없음(pm 명시).
+    """
+
+    def test_에이엘로봇_정정_subscription(self):
+        from app.parser import extract_subscription_dates
+        s, e = extract_subscription_dates(_load_cached("20261012000490"))
+        assert s == "2026-11-06"
+        assert e == "2026-11-09"
+
+    def test_에이엘로봇_정정_demand_forecast(self):
+        from app.parser import extract_demand_forecast_period
+        s, e = extract_demand_forecast_period(_load_cached("20261012000490"))
+        assert s == "2026-10-28"
+        assert e == "2026-11-03"
+
+    def test_에이엘로봇_정정_price_confirm(self):
+        from app.parser import extract_price_confirm_date
+        assert extract_price_confirm_date(_load_cached("20261012000490")) == "2026-11-04"
+
+    def test_엠비디_정정_subscription(self):
+        from app.parser import extract_subscription_dates
+        s, e = extract_subscription_dates(_load_cached("20261015000329"))
+        assert s == "2026-11-12"
+        assert e == "2026-11-13"
+
+    def test_엠비디_정정_demand_forecast(self):
+        from app.parser import extract_demand_forecast_period
+        s, e = extract_demand_forecast_period(_load_cached("20261015000329"))
+        assert s == "2026-11-02"
+        assert e == "2026-11-06"
+
+    def test_엠비디_정정_price_confirm(self):
+        from app.parser import extract_price_confirm_date
+        assert extract_price_confirm_date(_load_cached("20261015000329")) == "2026-11-10"
+
+    def test_다비오_정정_subscription(self):
+        from app.parser import extract_subscription_dates
+        s, e = extract_subscription_dates(_load_cached("20261008000705"))
+        assert s == "2026-11-10"
+        assert e == "2026-11-11"
+
+    def test_다비오_정정_demand_forecast(self):
+        from app.parser import extract_demand_forecast_period
+        s, e = extract_demand_forecast_period(_load_cached("20261008000705"))
+        assert s == "2026-11-02"
+        assert e == "2026-11-06"
+
+    def test_다비오_정정_price_confirm(self):
+        from app.parser import extract_price_confirm_date
+        assert extract_price_confirm_date(_load_cached("20261008000705")) == "2026-11-09"
+
+    def test_아델_확정가_가정문_거부(self):
+        from app.parser import extract_final_price
+        # 아델 20261012000445 — "확정공모가액이 23,445원 이상으로 결정되어" 가정문
+        assert extract_final_price(_load_cached("20261012000445")) is None
+
+    def test_씨앤엠_band(self):
+        from app.parser import extract_band
+        low, high = extract_band(_load_cached("20261016000412"))
+        assert low == 10_000
+        assert high == 13_000
+
+    def test_씨앤엠_tradable_ratio(self):
+        from app.parser import extract_tradable_ratio
+        assert extract_tradable_ratio(_load_cached("20261016000412")) == 45.75
+
+    def test_넥스아이_tradable_ratio(self):
+        from app.parser import extract_tradable_ratio
+        assert extract_tradable_ratio(_load_cached("20261016000268")) == 37.03
+
+    # 엘리스 lockup 는 캐시 포맷이 strip_tags 된 상태(테이블 구조 손실) 라
+    # 테이블 집계 기반 extract_lockup 로는 재현 어려움. v23 통합 테스트가 lockup 커버.
 
 
 # ---------- 정확도 보강 #3: 엘리스그룹 확약 — "합 계" COLSPAN 분리 ----------
