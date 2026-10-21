@@ -299,46 +299,81 @@ def extract_lockup(xml: str) -> tuple[Optional[float], Optional[Literal["allocat
 # 예1(디티에스): "약 15.15%에 해당하는 2,250,787주는 상장 직후 유통가능물량입니다"
 # 예2(티앤이코리아): "11,357,737주 중 31.27%에 해당하는 3,551,856주는 상장직후 유통가능 물량에 해당됩니다"
 # → "약" 선택, "유통가능" 뒤 공백 허용.
+# 지시 #38: 숫자 캡처에 쉼표도 허용 — 원문 오타 "37,68%" (이에스티 사례) 수용 후 _parse_pct 가 소수점으로 변환.
 _RE_TRADABLE_RATIO_NARRATIVE = re.compile(
-    r"(?:약\s*)?([\d.]+)\s*%\s*에\s*해당하는\s*[\d,]+\s*주[^<]{0,40}유통가능\s*물량"
+    r"(?:약\s*)?([\d.,]+)\s*%\s*에\s*해당하는\s*[\d,]+\s*주[^<]{0,40}유통가능\s*물량"
 )
 
 # 지시 #26: 삼성증권 형식(크리에이츠) — 순서 반전 "N주는 상장 직후 ... 유통가능 ... %"
-# "상기의 의무보유 수량을 제외한 주식수 5,176,832주는 상장 직후 시장에서 유통가능한 물량이며,
-#  상장예정주식수 기준으로 39.47%에 해당합니다"
-# 핵심 신호: "상장 직후" 근처 + "유통가능" + 그 뒤 N%. 상장 후 N개월 뒤 유통가능 섹션은 "상장 직후" 가 없음.
 _RE_TRADABLE_RATIO_NARRATIVE_INVERTED = re.compile(
-    r"상장\s*직후[^%<]{0,120}?유통가능[^%<]{0,120}?([\d.]+)\s*%"
+    r"상장\s*직후[^%<]{0,120}?유통가능[^%<]{0,120}?([\d.,]+)\s*%"
 )
 
 # 정확도 보강 (#1): 엠에스바이오 형식 — "주식수 N주(N.NN%)는 상장 직후 시장에서 유통가능한 물량입니다"
-# 괄호 안에 %가 **먼저** 들어오고 그 뒤에 "상장 직후 ... 유통가능" 서술이 오는 포맷.
 _RE_TRADABLE_RATIO_NARRATIVE_PAREN = re.compile(
-    r"[\d,]+\s*주\s*\(\s*([\d.]+)\s*%\s*\)[^%<]{0,60}상장\s*직후[^%<]{0,40}유통가능"
+    r"[\d,]+\s*주\s*\(\s*([\d.,]+)\s*%\s*\)[^%<]{0,60}상장\s*직후[^%<]{0,40}유통가능"
+)
+
+# 지시 #38: 이에스티 서술 — "상장일 유통가능 물량은 N주(상장일 기준 N,NN%)"
+# "유통가능 물량은" 뒤 N주 + 괄호 안 % 표기. 쉼표가 소수점을 대신하는 오타 수용.
+_RE_TRADABLE_RATIO_NARRATIVE_ESTAT = re.compile(
+    r"상장일\s*유통가능\s*물량[^<%]{0,20}?[\d,]+\s*주\s*\([^%<]{0,30}?([\d.,]+)\s*%\s*\)"
 )
 
 # fallback: 테이블 "유통가능물량(A-B)" 라벨 셀 뒤 300자 이내에서 "N.NN%" 매치 (첫 매치).
-# 중간에 한글 라벨(최대주주/벤처금융 등)이 끼면 다른 섹션이므로 거부.
 _RE_TRADABLE_RATIO_TABLE = re.compile(
-    r"유통가능물량[^가-힣%]{0,300}?([\d]+\.?\d+)\s*%"
+    r"유통가능물량[^가-힣%]{0,300}?([\d]+[.,]?\d+)\s*%"
 )
 
 
+def _parse_pct(s: Optional[str]) -> Optional[float]:
+    """퍼센트 문자열 → float. 지시 #38: 쉼표가 소수점을 대신하는 오타("37,68") 수용.
+
+    규칙:
+    - "." 포함: 기존대로 쉼표(천 단위) 제거 후 float
+    - "," 포함 + "." 없음: 쉼표를 소수점으로 간주 ("37,68" → 37.68)
+    - 결과가 0~100 범위 밖이면 null (추정 금지)
+    """
+    if s is None:
+        return None
+    s = s.strip()
+    if not s:
+        return None
+    if "." in s:
+        v = _to_float(s)
+    elif "," in s:
+        # 쉼표를 소수점으로 간주 (오타 수용)
+        try:
+            v = float(s.replace(",", "."))
+        except ValueError:
+            return None
+    else:
+        v = _to_float(s)
+    if v is None:
+        return None
+    if 0 <= v <= 100:
+        return v
+    return None
+
+
 def extract_tradable_ratio(xml: str) -> Optional[float]:
-    """상장일 유통가능 비율(%). 서술형(3종) → 테이블 fallback 순."""
+    """상장일 유통가능 비율(%). 서술형(4종) → 테이블 fallback 순."""
     text = _strip_tags(xml)
     m = _RE_TRADABLE_RATIO_NARRATIVE.search(text)
     if m:
-        return _to_float(m.group(1))
+        return _parse_pct(m.group(1))
     m_paren = _RE_TRADABLE_RATIO_NARRATIVE_PAREN.search(text)
     if m_paren:
-        return _to_float(m_paren.group(1))
+        return _parse_pct(m_paren.group(1))
     m_inv = _RE_TRADABLE_RATIO_NARRATIVE_INVERTED.search(text)
     if m_inv:
-        return _to_float(m_inv.group(1))
+        return _parse_pct(m_inv.group(1))
+    m_estat = _RE_TRADABLE_RATIO_NARRATIVE_ESTAT.search(text)
+    if m_estat:
+        return _parse_pct(m_estat.group(1))
     m2 = _RE_TRADABLE_RATIO_TABLE.search(text)
     if m2:
-        return _to_float(m2.group(1))
+        return _parse_pct(m2.group(1))
     return None
 
 
@@ -547,12 +582,16 @@ def extract_demand_forecast_period(xml: str) -> tuple[Optional[str], Optional[st
 
 # ---------- 모집·매출 구성 (신주·구주) ----------
 
-# 지시 (정확도 보강): "신주모집수량"/"신주모집주식수" / "구주매출수량"/"구주매출주식(의 )?수" 변형 수용.
+# 지시 #38: 라벨 뒤에 "유입자금|자금|총액|금액|금" (상대가치 평가표의 금액성 서술) 가 붙으면
+# 매치를 **차단** 한다. 영광 오류("신주모집유입자금 (E) 32,589,200") 재발 방지.
+# 수량 라벨(수량|주식(의) 수) 은 여전히 **optional** — "신주모집 1,000,000주" 같은 단순 표기 유지.
 _RE_NEW_SHARES = re.compile(
-    r"신주\s*모집(?:\s*(?:수량|주식(?:의)?\s*수))?[^0-9]{0,20}([0-9,]+)\s*주"
+    r"신주\s*모집(?!유입|자금|총액|금액|금)"
+    r"(?:\s*(?:수량|주식(?:의)?\s*수))?[^0-9]{0,20}([0-9,]+)\s*주"
 )
 _RE_OLD_SHARES = re.compile(
-    r"구주\s*매출(?:\s*(?:수량|주식(?:의)?\s*수))?[^0-9]{0,20}([0-9,]+)\s*주"
+    r"구주\s*매출(?!유입|자금|총액|금액|금)"
+    r"(?:\s*(?:수량|주식(?:의)?\s*수))?[^0-9]{0,20}([0-9,]+)\s*주"
 )
 # 라벨 바로 뒤의 선언형 숫자만 매치. 설명문 안 "공모주식수는..." 같은 조사형은 lookahead 로 차단.
 # 다비오("모집 또는 매출주식의 수" / "기명식 보통주 1,000,000주") 패턴도 추가.
@@ -577,9 +616,13 @@ def extract_offering_amount_krw(xml: str) -> Optional[int]:
 
 
 def extract_offering_counts(xml: str) -> dict:
-    """신주·구주·총 공모 주식 수 best-effort. 라벨이 다양해 fail-soft."""
+    """신주·구주·총 공모 주식 수 best-effort. 라벨이 다양해 fail-soft.
+
+    지시 #38: 범위 검증을 수행한다 — 음수·total 초과·합 불일치는 추정 금지(null).
+    """
     text = _strip_tags(xml)
     new = old = total = None
+    warnings: list[str] = []
 
     mn = _RE_NEW_SHARES.search(text)
     if mn:
@@ -603,7 +646,30 @@ def extract_offering_counts(xml: str) -> dict:
     if old is None and total is not None and new is not None:
         old = total - new
 
-    return {"new": new, "old": old, "total": total}
+    # 지시 #38: 범위 검증. 음수·total 초과·합 불일치는 **null + warning**.
+    if new is not None and new < 0:
+        warnings.append(f"신주 수 음수({new}) — 평가표 등 잘못된 매치 가능성, null")
+        new = None
+    if old is not None and old < 0:
+        warnings.append(f"구주 수 음수({old}) — null")
+        old = None
+    if total is not None and total <= 0:
+        warnings.append(f"총 공모 주식 수 비정상({total}) — null")
+        total = None
+    if new is not None and total is not None and new > total:
+        warnings.append(f"신주 수({new}) > 총 공모 주식 수({total}) — 라벨 매치 오류, null")
+        new = None
+    if old is not None and total is not None and old > total:
+        warnings.append(f"구주 수({old}) > 총 공모 주식 수({total}) — null")
+        old = None
+    if new is not None and old is not None and total is not None and new + old != total:
+        warnings.append(
+            f"신주({new}) + 구주({old}) = {new + old} ≠ 총({total}) — 둘 중 잘못 매치, 신주·구주 null"
+        )
+        new = None
+        old = None
+
+    return {"new": new, "old": old, "total": total, "warnings": warnings}
 
 
 # ---------- 통합 파서 ----------
@@ -692,9 +758,17 @@ def parse(
     out.new_share_count = off["new"]
     out.old_share_count = off["old"]
     out.total_offering_count = off["total"]
+    # 지시 #38: 범위 검증 warning 전파
+    for w in off.get("warnings", []):
+        out.warnings.append(w)
     if out.total_offering_count:
         if out.old_share_count is not None:
-            out.old_share_ratio = round(out.old_share_count / out.total_offering_count * 100, 2)
+            ratio = round(out.old_share_count / out.total_offering_count * 100, 2)
+            # 지시 #38: 비율 범위 검증 — 0~100 외는 null
+            if 0 <= ratio <= 100:
+                out.old_share_ratio = ratio
+            else:
+                out.warnings.append(f"구주매출 비율({ratio}%) 범위 밖 — null")
     else:
         out.warnings.append("모집(매출) 주식 수 구성을 찾지 못함")
 

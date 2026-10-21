@@ -109,7 +109,10 @@ def test_dtis_parse_full(dtis_xml_bytes):
 def test_offering_counts_graceful_when_absent():
     # 구조에 명확한 "신주 모집 N 주" 패턴이 없을 수 있음 — None 허용
     off = extract_offering_counts("아무 텍스트도 없음")
-    assert off == {"new": None, "old": None, "total": None}
+    assert off["new"] is None
+    assert off["old"] is None
+    assert off["total"] is None
+    assert off["warnings"] == []
 
 
 # ---------------------- v0.5 보강 — 의무보유확약 (테이블 집계) ----------------------
@@ -555,6 +558,75 @@ def test_extract_tradable_ratio_paren_percent_requires_sang_jang_jik_hu():
     from app.parser import _RE_TRADABLE_RATIO_NARRATIVE_PAREN
     text = "<P>신주 100,000주(5%) 추가 발행 예정</P>"
     assert _RE_TRADABLE_RATIO_NARRATIVE_PAREN.search(text) is None
+
+
+# ---------------- 지시 #38: 영광 음수 구주 재발 방지 ----------------
+
+def test_extract_offering_counts_rejects_eval_table_금액_label():
+    """영광 사례 — 상대가치 평가표 '신주모집유입자금 (E) 32,589,200' 를 **매치하지 않는다**.
+
+    원문 평가표가 '신주모집' 라벨만 걸치는 금액성 서술을 수량으로 오인한 사고.
+    기대: 다른 모집(매출)할 증권 표의 본값 '신주모집수량 2,260,000주' 만 매치.
+    """
+    text = (
+        "<P>상대가치 평가표: 신주모집유입자금 (E) 32,589,200 (단위: 천원)</P>"
+        "<P>모집할 증권: 신주모집수량 2,260,000주 (구주매출 없음)</P>"
+    )
+    res = extract_offering_counts(text)
+    # 금액성 라벨은 거부, 본값만 매치
+    assert res["new"] == 2_260_000, res
+    assert res["old"] is None, res
+
+
+def test_extract_offering_counts_negative_old_dropped():
+    """구주 수가 음수로 나오면(파싱 오류) null + warning."""
+    # total 명시 + new 명시 → old = total - new 로 음수 계산되는 상황 재현
+    text = (
+        "<P>신주모집수량 32,589,200주</P>"
+        "<P>총 공모 주식 수 2,260,000주</P>"
+    )
+    res = extract_offering_counts(text)
+    # new(32,589,200) > total(2,260,000) → new null, old 계산 안됨
+    assert res["new"] is None, res
+    assert any("신주" in w for w in res["warnings"]), res["warnings"]
+
+
+def test_extract_offering_counts_sum_mismatch_both_null():
+    """신주 + 구주 ≠ 총 공모 수 — 둘 중 하나는 오매치, 양쪽 null."""
+    text = (
+        "<P>신주모집수량 1,000,000주</P>"
+        "<P>구주매출수량 500,000주</P>"
+        "<P>총 공모 주식 수 2,000,000주</P>"
+    )
+    res = extract_offering_counts(text)
+    assert res["new"] is None
+    assert res["old"] is None
+    assert res["total"] == 2_000_000
+    assert any("≠" in w for w in res["warnings"])
+
+
+# ---------------- 지시 #38: 이에스티 유통 "N,NN%" 쉼표 오타 수용 ----------------
+
+def test_extract_tradable_ratio_estat_comma_decimal():
+    """이에스티 원문 — '상장일 유통가능 물량은 5,243,400주(상장일 기준 37,68%)'.
+
+    쉼표가 소수점을 대신하는 원문 오타 → 37.68 로 해석.
+    """
+    text = (
+        "<P>상장일 유통가능 물량은 5,243,400주(상장일 기준 37,68%)에 해당합니다.</P>"
+    )
+    assert extract_tradable_ratio(text) == 37.68
+
+
+def test_parse_pct_comma_as_decimal():
+    """_parse_pct — 쉼표가 소수점을 대신하면 치환하여 변환."""
+    from app.parser import _parse_pct
+    assert _parse_pct("37,68") == 37.68
+    assert _parse_pct("37.68") == 37.68
+    assert _parse_pct("37") == 37.0
+    # 범위 밖은 null
+    assert _parse_pct("150,00") is None
+    assert _parse_pct("-5") is None
 
 
 # ---------- 정확도 보강 #3: 엘리스그룹 확약 — "합 계" COLSPAN 분리 ----------
