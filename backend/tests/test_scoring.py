@@ -541,6 +541,67 @@ def test_checklist_unknown_when_values_null(cfg):
         assert by_key[k].actual is None
 
 
+def test_45_flow_tradable_null_old_share_ge_30_narrows_to_zero(cfg):
+    """지시 #45 ②-4: tradable null + 구주 >= 30 → flow {0} 확정.
+
+    pm 예시: comp15+price10+lockup10, tradable null, 구주 40% → total 35 → REJECT
+    (현재는 INCOMPLETE 였음).
+    """
+    from app.scoring import evaluate
+    r = evaluate(
+        _ind(
+            competition_rate=800.0,       # 15점 (tier 500<= <1000)
+            price_position="WITHIN_BAND", # 10점
+            lockup_ratio=15.0,            # 10점 (otherwise)
+            tradable_ratio=None,
+            old_share_ratio=40.0,         # ≥ 30 → flow {0} 확정
+        ),
+        cfg,
+    )
+    # flow {0} 확정 → 총점 range 하나 → PASS/REJECT 확정
+    assert r.status == "REJECT"
+    # 총점 범위가 좁혀져 확정됨 (40~40)
+    assert r.score_range == (40, 40)
+
+
+def test_45_flow_tradable_null_old_share_zero_keeps_range(cfg):
+    """지시 #45 ②-4: tradable null + 구주 0 → top_if 가능 → 범위 {0, otherwise, top_pt} 유지."""
+    from app.scoring import _flow_possible_points
+    pts = _flow_possible_points(_ind(tradable_ratio=None, old_share_ratio=0.0), cfg)
+    # zero_pt(0) + otherwise + top_pt 세 값
+    assert 0 in pts
+    assert len(pts) == 3
+
+
+def test_45_flow_tradable_null_old_share_middle_narrows_to_two(cfg):
+    """지시 #45 ②-4: tradable null + 0<구주<30 → top_if 불가 → {0, otherwise}."""
+    from app.scoring import _flow_possible_points
+    pts = _flow_possible_points(_ind(tradable_ratio=None, old_share_ratio=15.0), cfg)
+    assert 0 in pts
+    # top_pt 는 제외되어 2개만
+    assert len(pts) == 2
+
+
+def test_incomplete_reasons_use_korean_price_position_label(cfg):
+    """지시 #45 ②-5: _incomplete_reasons 에 enum 원문 대신 한글 라벨 사용."""
+    from app.scoring import _incomplete_reasons
+    ind = _ind(price_position="TOP_OF_BAND", lockup_ratio=None)
+    lines = _incomplete_reasons(ind)
+    joined = " ".join(lines)
+    assert "TOP_OF_BAND" not in joined
+    assert "밴드 최상단" in joined
+
+
+def test_reason_lines_null_old_shows_mi_hwak_in(cfg):
+    """지시 #45 ②-5: tradable 있고 구주 null 이면 "구주매출 0.0%" 대신 "미확인"."""
+    from app.scoring import evaluate
+    # tradable > 35 로 flow=0 확정 (status 는 PASS/REJECT)
+    r = evaluate(_ind(tradable_ratio=40.0, old_share_ratio=None), cfg)
+    joined = " ".join(r.reasons)
+    assert "구주매출 0.0%" not in joined
+    assert "미확인" in joined
+
+
 def test_checklist_flow_not_met_by_tradable_gt_even_if_old_null(cfg):
     """지시 #40: 유통>max → old null 이어도 NOT_MET 확정 (한쪽만으로 결정)."""
     cl = build_checklist(_ind(tradable_ratio=38.88, old_share_ratio=None), cfg)

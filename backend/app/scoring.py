@@ -154,8 +154,18 @@ def _flow_possible_points(ind: Indicators, cfg: ScoringConfig) -> list[int]:
     other_pt = s.otherwise
     top_pt = s.top_if.points
 
+    # 지시 #45 ②-4: tradable null 이어도 **구주 확정값** 으로 범위 좁힘.
+    # 구주 ≥ zero_if.old_share_gte → zero_if OR 조건으로 {0} 확정.
+    # 구주 == top_if.old_share_eq(0) → top_if 가능 → {0, otherwise, top_pt}.
+    # 그 외 → top_if 불가 → {0, otherwise}.
     if ind.tradable_ratio is None:
-        return sorted({zero_pt, other_pt, top_pt})
+        if ind.old_share_ratio is None:
+            return sorted({zero_pt, other_pt, top_pt})
+        if ind.old_share_ratio >= s.zero_if.old_share_gte:
+            return [zero_pt]
+        if ind.old_share_ratio == s.top_if.old_share_eq:
+            return sorted({zero_pt, other_pt, top_pt})
+        return sorted({zero_pt, other_pt})
 
     if ind.tradable_ratio > s.zero_if.tradable_gt:
         # old_share 가 뭐든 0 확정
@@ -172,24 +182,6 @@ def _flow_possible_points(ind: Indicators, cfg: ScoringConfig) -> list[int]:
 
 
 # ---------- 근거 문장 ----------
-
-def _is_incomplete(ind: Indicators) -> bool:
-    """v1.0 (지시 #19): 경쟁률·가격 있지만 다음 지표 중 하나라도 null 이면 판정 보류.
-
-    - lockup_ratio null
-    - tradable_ratio null
-    - tradable ≤ 35 이면서 old_share null (flow 가 0 로 확정될 수 없음)
-
-    tradable > 35 이면 어차피 flow=0 (zero_if) 로 확정되므로 old_share null 이어도 PASS/REJECT 진행 가능.
-    """
-    if ind.lockup_ratio is None:
-        return True
-    if ind.tradable_ratio is None:
-        return True
-    if ind.tradable_ratio <= 35 and ind.old_share_ratio is None:
-        return True
-    return False
-
 
 def _reason_lines(
     ind: Indicators,
@@ -230,9 +222,12 @@ def _reason_lines(
             f"기관 의무보유확약 비율 {ind.lockup_ratio:.1f}% → {scores.lockup}/{cfg.score.lockup.max}점"
         )
     if ind.tradable_ratio is not None and scores.flow is not None:
-        old_s = ind.old_share_ratio if ind.old_share_ratio is not None else 0.0
+        # 지시 #45 ②-5: 구주매출 null 을 "0.0%" 로 표시하지 않고 "미확인" 로 명시
+        old_s_label = (
+            f"{ind.old_share_ratio:.1f}%" if ind.old_share_ratio is not None else "미확인"
+        )
         lines.append(
-            f"상장일 유통가능 {ind.tradable_ratio:.1f}%, 구주매출 {old_s:.1f}% "
+            f"상장일 유통가능 {ind.tradable_ratio:.1f}%, 구주매출 {old_s_label} "
             f"→ {scores.flow}/{cfg.score.flow.max}점"
         )
 
@@ -246,7 +241,14 @@ def _incomplete_reasons(ind: Indicators) -> list[str]:
     assert ind.price_position is not None
     # 확정된 지표도 확인용으로 짧게 같이 보여줌
     lines.append(f"기관 수요예측 경쟁률 {ind.competition_rate:,.1f}:1")
-    lines.append(f"확정 공모가 위치: {ind.price_position}")
+    # 지시 #45 ②-5: enum 원문(TOP_OF_BAND 등) 대신 한글 라벨
+    _pos_label = {
+        "ABOVE_BAND": "밴드 최상단 초과",
+        "TOP_OF_BAND": "밴드 최상단",
+        "WITHIN_BAND": "밴드 내",
+        "BELOW_BAND": "밴드 하단 미만",
+    }.get(ind.price_position, ind.price_position)
+    lines.append(f"확정 공모가 위치: {_pos_label}")
     if ind.lockup_ratio is None:
         lines.append("의무보유확약 비율 확인 필요 — 판정 보류")
     if ind.tradable_ratio is None:

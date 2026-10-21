@@ -727,6 +727,40 @@ def test_extract_tradable_ratio_공백_유통가능():
     assert extract_tradable_ratio(text) == 23.33
 
 
+# ---------------- 지시 #45 ②-2: 쉼표 단독 매치 방지 ----------------
+
+def test_extract_offering_counts_rejects_bare_comma_match():
+    """다비오 재현 — "신주모집주식수, 주관사…" 패턴에서 "," 를 수량으로 매치하지 말 것."""
+    text = (
+        "<P>신주모집주식수, 주관사 한국투자증권. "
+        "신주모집수량 1,000,000주 (구주매출 없음)</P>"
+    )
+    res = extract_offering_counts(text)
+    # "," 단독 매치는 거부 → 다음 "1,000,000주" 가 매치되어야
+    assert res["new"] == 1_000_000, res
+    assert res["old"] == 0, res  # 구주매출 없음
+
+
+def test_extract_band_rejects_bare_comma():
+    """밴드 regex 도 "," 단독 매치 방지."""
+    from app.parser import extract_band
+    text = "<P>공모희망가액, 10,000원~13,000원</P>"
+    low, high = extract_band(text)
+    assert low == 10_000
+    assert high == 13_000
+
+
+# ---------------- 지시 #45 ②-8: 청약 종료 연도 생략 허용 ----------------
+
+def test_extract_subscription_omits_end_year():
+    """청약기간 "2026년 10월 20일 ~ 10월 21일" (종료 연도 생략) → 시작 연도 재사용."""
+    from app.parser import extract_subscription_dates
+    text = "<P>청약기간 2026년 10월 20일 ~ 10월 21일</P>"
+    s, e = extract_subscription_dates(text)
+    assert s == "2026-10-20"
+    assert e == "2026-10-21"
+
+
 # ---------------- 지시 #40: 아델 — "확정공모가액이 N원 이상 … 경우" 가정문 거부 ----------------
 
 def test_extract_final_price_rejects_가정문():

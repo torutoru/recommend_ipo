@@ -74,7 +74,9 @@ DART_URL = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo="
 #   v24 — 지시 #42 (정정 신고서 서두 정정표 skip — "대표이사 등의 확인" 이후 본문에서만 일정·밴드 추출)
 #   v25 — 지시 #43 (final_price 저장 조건부 COALESCE — competition_rate 미공시면 excluded 교체, 아델 오파싱 보존 해소)
 #   v26 — 지시 #46 ① (COALESCE 축소 — 정상 파싱이면 지표/일정 excluded 교체, listing_date·market·underwriters 는 전용 출처 보호)
-PARSER_VERSION = "v26"
+#   v27 — 지시 #45 ② 묶음1 (쉼표 단독 매치 방지·청약 종료 연도 생략·INCOMPLETE 한글 라벨·_is_incomplete 삭제)
+#   v28 — 지시 #45 ②-4 (flow 범위 좁힘 — tradable null 이어도 구주 확정이면 좁은 범위 반환)
+PARSER_VERSION = "v28"
 
 
 # ---------- 분류 ----------
