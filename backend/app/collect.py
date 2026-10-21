@@ -30,6 +30,7 @@ from . import dart_client  # 테스트 격리 위해 모듈 참조 (`dart_client
 from .parser import parse
 from .security import mask_secrets as _mask  # 지시 #45 ①: 모든 외부 노출 문자열에 적용
 from .store import (
+    ensure_ipo_stub,
     connect,
     finish_collect_run,
     init_db,
@@ -424,7 +425,9 @@ def process_corp(
             # 지시 #22: 다운로드/압축해제 실패 → 기존 데이터 **덮어쓰지 않음**.
             # upsert_ipo 호출 skip, parser_version 도 갱신 안 함 → 다음 수집에서 재시도.
             # sources·warnings 는 참고용이므로 업데이트해 둠(기존 데이터와 충돌 없음).
+            # 지시 #47: 신규 종목이면 ipos 가 없어 sources FK 실패 → stub row 로 선 보장.
             with connect() as conn:
+                ensure_ipo_stub(conn, corp_code, corp_name)
                 replace_sources(conn, corp_code, sources_payload)
                 replace_warnings(conn, corp_code, parsed_warnings)
             return {
@@ -451,7 +454,9 @@ def process_corp(
         if all(v is None for v in core_signals):
             msg = f"파싱 결과 핵심 지표 전부 null({rcept_no}) — 저장 skip"
             parsed_warnings.append(msg)
+            # 지시 #47: 신규 종목이면 ipos 가 없어 sources FK 실패 → stub row 로 선 보장.
             with connect() as conn:
+                ensure_ipo_stub(conn, corp_code, corp_name)
                 replace_sources(conn, corp_code, sources_payload)
                 replace_warnings(conn, corp_code, parsed_warnings)
             return {

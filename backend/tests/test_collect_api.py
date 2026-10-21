@@ -411,6 +411,74 @@ def test_46_underwriters_preserved_when_estkRs_fetch_absent(client):
     assert "한국투자증권" in after["underwriters"]  # COALESCE 보호
 
 
+def test_47_new_corp_download_failure_does_not_fk_fail(client, monkeypatch, tmp_path):
+    """지시 #47 — 빈 DB(신규 종목) 가 다운로드 실패 분기를 타도 sources FK 실패 안 함.
+
+    하나에어로다이내믹스 재현: ipos 에 없는 신규 종목 → core 는 발견했으나 다운로드 실패
+    → replace_sources 전 ensure_ipo_stub 호출로 FK 성립.
+    """
+    from app import collect as collect_mod, dart_client
+    monkeypatch.setattr(collect_mod, "CACHE_DIR", tmp_path / "cache")
+
+    items = [_disc("20261108000055", "[발행조건확정]증권신고서(지분증권)",
+                   "01025617", "하나에어로다이내믹스")]
+    _mock_dart(monkeypatch, list_items=items)
+
+    def failing_download(*, rcept_no, timeout=20.0):
+        raise RuntimeError("fake network down")
+    monkeypatch.setattr(dart_client, "download_document_zip", failing_download)
+
+    r = client.post("/api/collect")
+    assert r.status_code == 202
+    s = _wait_done(client)
+
+    # FK 실패 없이 download_failed 로 분류되어야
+    assert s["summary"]["failed_count"] >= 1
+    fail = s["failures"][0]
+    assert fail["corp_code"] == "01025617"
+    assert "FOREIGN KEY" not in fail["reason"]
+    # ipos stub 이 생겼는지 확인
+    with store.connect() as conn:
+        row = conn.execute(
+            "SELECT corp_code, corp_name FROM ipos WHERE corp_code='01025617'"
+        ).fetchone()
+    assert row is not None
+    assert row["corp_name"] == "하나에어로다이내믹스"
+
+
+def test_47_new_corp_parse_empty_does_not_fk_fail(client, monkeypatch, tmp_path):
+    """지시 #47 — 빈 DB(신규 종목) 가 parse_empty 분기를 타도 sources FK 실패 안 함."""
+    from app import collect as collect_mod, dart_client
+    monkeypatch.setattr(collect_mod, "CACHE_DIR", tmp_path / "cache")
+
+    items = [_disc("20261108000099", "[발행조건확정]증권신고서(지분증권)",
+                   "99991025", "테스트신규종목")]
+    _mock_dart(monkeypatch, list_items=items)
+
+    # 다운로드는 성공하지만 파싱 결과 핵심 지표 전부 null (의미 없는 XML)
+    import io, zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("doc.xml", "<DOC><P>의미 없는 본문</P></DOC>")
+    empty_zip = buf.getvalue()
+
+    def fake_download(*, rcept_no, timeout=20.0):
+        return empty_zip
+    monkeypatch.setattr(dart_client, "download_document_zip", fake_download)
+
+    r = client.post("/api/collect")
+    assert r.status_code == 202
+    s = _wait_done(client)
+    # FK 실패 없이 동작
+    assert all("FOREIGN KEY" not in (f.get("reason") or "") for f in s.get("failures", []))
+    # ipos stub 이 생겼는지
+    with store.connect() as conn:
+        row = conn.execute(
+            "SELECT corp_code FROM ipos WHERE corp_code='99991025'"
+        ).fetchone()
+    assert row is not None
+
+
 def test_45_crtfc_key_masked_in_parse_warnings_startup(client):
     """지시 #45 ① — 기동 시 parse_warnings 에 저장된 crtfc_key=값 패턴이 UPDATE 마스킹됨.
 

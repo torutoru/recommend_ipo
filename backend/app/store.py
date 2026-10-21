@@ -270,6 +270,24 @@ def replace_warnings(
     )
 
 
+def ensure_ipo_stub(
+    conn: sqlite3.Connection,
+    corp_code: str,
+    corp_name: str,
+) -> None:
+    """지시 #47: sources·parse_warnings 를 쓰기 전에 ipos 행 존재를 보장.
+
+    신규 종목 download_failed / parse_empty 분기에서 ipos 행이 없는 채
+    sources(FK) 를 쓰려 하면 `IntegrityError: FOREIGN KEY constraint failed`.
+    stub row(corp_code + corp_name + updated_at 만, 지표는 null) 로 FK 를 성립시킨다.
+    기존 행이 있으면 `INSERT OR IGNORE` 로 no-op.
+    """
+    conn.execute(
+        "INSERT OR IGNORE INTO ipos (corp_code, corp_name, updated_at) VALUES (?, ?, ?)",
+        (corp_code, corp_name, now_iso_kst()),
+    )
+
+
 def mask_crtfc_key_in_warnings(path: Optional[Path] = None) -> int:
     """지시 #45 ①: parse_warnings 에 저장된 메시지 중 `crtfc_key=…` 패턴을
     `crtfc_key=***` 로 UPDATE 마스킹. 반환값은 마스킹된 행 수.
