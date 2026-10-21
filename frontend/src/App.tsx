@@ -28,7 +28,7 @@ export default function App() {
       <header className="site-header">
         <div className="site-title">
           <h1>공모주 청약 추천</h1>
-          <span className="subtitle">DART 공시 기반 — PENDING / PASS(등급) / REJECT 판정</span>
+          <span className="subtitle">DART 공시 기반 — PENDING / PASS(S·A·B) / REJECT / 판정 보류 / 정정 요구</span>
         </div>
         <nav className="site-nav">
           <NavLink to="/" end>달력</NavLink>

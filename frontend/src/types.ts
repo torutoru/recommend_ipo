@@ -1,4 +1,4 @@
-// .claude/co-work/api-contract.md (v0.3) 와 1:1 매칭. 변경 전 pm 과 협상.
+// .claude/co-work/api-contract.md (v1.6) 와 1:1 매칭. 변경 전 pm 과 협상.
 
 // v0.8 CORRECTION = 정정 요구·일정 변경 가능
 // v1.0 INCOMPLETE = 판정 보류·데이터 확인 필요 (미공시 0점 처리 폐지)
@@ -138,6 +138,9 @@ export interface ListParams {
 export interface Health {
   status: string
   last_collected_at: string | null
+  // v1.5: backend #31 반영 예정. 미반영 응답은 필드 자체가 없을 수 있어 optional.
+  parser_version?: string | null
+  commit?: string | null
 }
 
 // --- v0.5 수집 실행 (POST /api/collect, GET /api/collect/status) ---------
@@ -157,6 +160,13 @@ export interface CollectSummary {
   withdrawn_count: number
 }
 
+// v1.3: 실패 종목별 사유 (키·URL·경로 제거된 300자 이내 요약).
+export interface CollectFailure {
+  corp_code: string
+  corp_name: string
+  reason: string
+}
+
 export interface CollectStatus {
   status: CollectState
   started_at: string | null
@@ -166,6 +176,8 @@ export interface CollectStatus {
   error: string | null
   // /api/health 와 동일한 "마지막 성공 수집 시각".
   last_collected_at: string | null
+  // v1.3: 실패 종목·사유. backend 미반영 응답은 필드가 없을 수 있어 optional.
+  failures?: CollectFailure[]
 }
 
 // POST /api/collect 응답 분기.

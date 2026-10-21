@@ -15,6 +15,7 @@ import {
   fmtBand,
   fmtDate,
   fmtDateRange,
+  fmtDateTime,
   fmtKrw,
   fmtKrwAbbrev,
   fmtOrNull,
@@ -26,6 +27,7 @@ import {
   NULL_PLACEHOLDER,
   pricePositionLabel,
 } from '../utils/format'
+import { toYmd } from '../utils/calendar'
 
 // v1.6 (#24): 공모가 위치 카드의 짧은 기준 힌트.
 const PRICE_HINT = '최상단 초과 시 25점'
@@ -122,7 +124,8 @@ export function DetailPage() {
   return (
     <section className="page page-detail">
       <div className="back-link">
-        <Link to="/">← 목록으로</Link>
+        {/* v1.6 (#26-7): `/` 는 달력이므로 라벨도 "달력으로" 로 교정. */}
+        <Link to="/">← 달력으로</Link>
       </div>
 
       <header className="detail-head">
@@ -148,7 +151,14 @@ export function DetailPage() {
             <dd>
               {(() => {
                 if (detail.verdict.status === 'INCOMPLETE') {
-                  return <strong className="verdict-incomplete">판정 보류 · 데이터 확인 필요</strong>
+                  const r = detail.verdict.score_range
+                  // v1.6 (#26-4): INCOMPLETE 에 score_range 가 있으면 가능 범위 함께 표시.
+                  return (
+                    <>
+                      <strong className="verdict-incomplete">판정 보류 · 데이터 확인 필요</strong>
+                      {r && <> · 가능 범위 <strong>{r.min}~{r.max}점</strong></>}
+                    </>
+                  )
                 }
                 const range = detail.verdict.score_range
                 // v1.4 — PASS: "min~max점 · 최소 등급". REJECT: "최대 max점".
@@ -188,15 +198,16 @@ export function DetailPage() {
             </dd>
           </div>
           <div><dt>기준 공시 접수번호</dt><dd>{fmtOrNull(ind.report_rcept_no, s => s)}</dd></div>
-          <div><dt>갱신 시각</dt><dd>{detail.updated_at}</dd></div>
+          {/* v1.6 (#26-7): updated_at 을 사람이 읽기 좋은 형태로. */}
+          <div><dt>갱신 시각</dt><dd>{fmtDateTime(detail.updated_at)}</dd></div>
         </dl>
       </header>
 
-      {/* v1.1 — PENDING 인데 확정공고일이 이미 지났으면 "다시 수집" 유도
-          (backend 미반영 응답은 price_confirm_date 가 undefined 일 수 있음 — `!= null` 로 둘 다 처리) */}
-      {detail.verdict.status === 'PENDING' &&
+      {/* v1.1 + v1.6 (#26-2): PENDING·CORRECTION 인데 확정공고일이 이미 지났으면 "다시 수집" 유도.
+          toYmd(new Date()) 는 KST 로컬 기준 — UTC slice 로 하루 밀리는 버그 수정. */}
+      {(detail.verdict.status === 'PENDING' || detail.verdict.status === 'CORRECTION') &&
         detail.price_confirm_date != null &&
-        detail.price_confirm_date < new Date().toISOString().slice(0, 10) && (
+        detail.price_confirm_date < toYmd(new Date()) && (
           <aside className="overdue-banner" role="status">
             확정공고일({detail.price_confirm_date})이 지났지만 아직 수요예측 결과가 수집되지 않았습니다.
             홈에서 <strong>"수집 및 분석하기"</strong> 를 눌러 다시 시도해 주세요.
@@ -230,15 +241,13 @@ export function DetailPage() {
       <h3>지표 및 점수</h3>
       <div className="indicator-grid">
         {rows.map((r, i) => {
-          // v1.0: 미공시 0점 처리 폐지. 지표 null + 점수 null 인 INCOMPLETE 종목에서
-          // 해당 지표 셀에 "확인 필요" 라벨을 붙여 판정 보류 사유를 바로 보이게.
-          // v1.4: score_range 로 PASS/REJECT 확정된 종목도 미확인 지표에 "확인 필요".
+          // v1.0: 미공시 0점 처리 폐지.
+          // v1.6 (#26-5): 지표 null 이면서 **점수도 null** 인 경우에만 "확인 필요".
+          //              (유통·구주 중 하나만 null + flow 점수 확정이면 숨김.)
           const needsInput =
             r.indicatorMissing &&
-            (
-              (detail.verdict.status === 'INCOMPLETE' && r.scoreValue === null) ||
-              (detail.verdict.score_range != null)
-            )
+            r.scoreValue === null &&
+            (detail.verdict.status === 'INCOMPLETE' || detail.verdict.score_range != null)
           return (
             <div className="indicator-card" key={i}>
               <div className="indicator-label">{r.label}</div>

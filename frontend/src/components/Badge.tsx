@@ -30,9 +30,11 @@ export function VerdictBadge({ verdict }: { verdict: Verdict }) {
     return <span className="badge badge-reject" title="청약 비추천">REJECT</span>
   }
   const grade = verdict.grade ?? '-'
+  // v1.6 (#26-1): 범위 확정 PASS 는 "PASS · 최소 B" 로 표기 (등급이 min 기준임을 알림).
+  const rangeMin = verdict.score_range != null
   return (
     <span className={`badge badge-pass badge-grade-${grade}`}>
-      PASS · {grade}
+      PASS · {rangeMin ? '최소 ' : ''}{grade}
     </span>
   )
 }

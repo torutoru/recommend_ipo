@@ -103,6 +103,12 @@ export function ListPage() {
                           기관 결과 공개 예정: {it.price_confirm_date} (확정공고)
                         </div>
                       )}
+                    {/* v1.6 (#26-6): CORRECTION 종목에 "일정 변경 가능" 라벨 (requirements 14장) */}
+                    {it.verdict.status === 'CORRECTION' && (
+                      <div className="band-final" style={{ color: 'var(--correction)' }}>
+                        ⚠ 일정 변경 가능
+                      </div>
+                    )}
                   </td>
                   <td>{fmtOrNull(it.listing_date, fmtDate)}</td>
                   <td className="band-cell">
@@ -113,9 +119,13 @@ export function ListPage() {
                   </td>
                   <td><VerdictBadge verdict={it.verdict} /></td>
                   <td className="score-cell">
-                    {it.verdict.score === null
-                      ? NULL_PLACEHOLDER
-                      : `${it.verdict.score} / 100`}
+                    {(() => {
+                      // v1.6 (#26-1): score_range 가 있으면 "min~max / 100". 그 외 단일 점수.
+                      const r = it.verdict.score_range
+                      if (r) return `${r.min}~${r.max} / 100`
+                      if (it.verdict.score === null) return NULL_PLACEHOLDER
+                      return `${it.verdict.score} / 100`
+                    })()}
                   </td>
                 </tr>
               ))}

@@ -291,28 +291,7 @@ table.checklist-table tbody tr.result-info   { background: #fcfcff; }
 .result-badge.result-info   { background: #e8f0ff; color: var(--accent); border-color: #cfdbf5; }
 .result-icon { font-size: 14px; line-height: 1; }
 
-/* Deposit breakdown ------------------------------------------------------- */
-.deposit-breakdown {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 6px 24px;
-  margin: 8px 0 0;
-  padding: 12px 16px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  font-size: 14px;
-}
-.deposit-breakdown > div { display: contents; }
-.deposit-breakdown dt { color: var(--fg-mute); }
-.deposit-breakdown dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
-.deposit-breakdown .deposit-total dt,
-.deposit-breakdown .deposit-total dd {
-  padding-top: 8px;
-  border-top: 1px solid var(--border);
-  margin-top: 4px;
-  color: var(--fg);
-}
+/* v1.6 (#26-7): 균등 증거금 폐지 — .deposit-* 블록 삭제. */
 
 /* Wake banner -------------------------------------------------------------- */
 .wake-banner {
@@ -405,6 +384,20 @@ table.checklist-table tbody tr.result-info   { background: #fcfcff; }
 }
 .key-prompt-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
 .key-prompt-note { margin: 8px 0 0; color: var(--fg-mute); font-size: 11px; }
+
+/* v1.3 (#26-3): 수집 실패 종목 접이식 목록 */
+.collect-failures {
+  margin: 4px 0 10px;
+  padding: 8px 12px;
+  background: var(--reject-weak);
+  border: 1px solid #f0b2ab;
+  border-radius: var(--radius);
+  font-size: 12px;
+}
+.collect-failures summary { cursor: pointer; color: var(--reject); font-weight: 600; }
+.collect-failures ul { margin: 6px 0 0; padding-left: 20px; }
+.collect-failures li { margin: 3px 0; }
+.collect-failures code { color: var(--fg-mute); font-size: 11px; }
 
 /* Calendar ----------------------------------------------------------------- */
 .cal-head {
@@ -543,15 +536,7 @@ table.checklist-table tbody tr.result-info   { background: #fcfcff; }
   overflow-wrap: anywhere;      /* v1.7 */
   word-break: break-all;        /* v1.7 — 긴 영문도 끊기 */
 }
-.cal-chip .chip-type {
-  font-size: 10px;
-  padding: 0 4px;
-  border-radius: 2px;
-  background: rgba(255, 255, 255, 0.22);
-  color: inherit;
-  flex: 0 0 auto;
-}
-.cal-chip .chip-grade { font-weight: 700; flex: 0 0 auto; }
+/* v1.6 (#26-7): .chip-type·.chip-grade 미사용 — EventChip 은 chip-name 만 렌더. */
 .cal-chip .chip-name {
   flex: 1 1 100%;
   min-width: 0;
@@ -573,8 +558,7 @@ table.checklist-table tbody tr.result-info   { background: #fcfcff; }
 .cal-chip.event-pending    { background: var(--chip-neutral-bg);    color: var(--chip-neutral-fg);    }
 .cal-chip.event-correction { background: var(--chip-neutral-bg);    color: var(--chip-neutral-fg);    }
 
-/* 연한 파랑(B) 만 어두운 글자 — chip-type / chip-listing 보정 */
-.cal-chip.event-pass-b .chip-type       { background: rgba(10, 43, 87, 0.1); }
+/* 연한 파랑(B) 만 어두운 글자 — chip-listing outline 보정 */
 .cal-chip.event-pass-b.chip-listing     { outline-color: rgba(10, 43, 87, 0.55); }
 /* PENDING 은 "판정 완료 종목" 이 눈에 띄도록 흐린 톤.
    opacity 가 아닌 배경·글자색 대조로 처리해 텍스트 가독성은 유지. */
@@ -657,7 +641,6 @@ table.checklist-table tbody tr.result-info   { background: #fcfcff; }
   .cal-cell { min-height: 60px; padding: 2px 3px 4px; }
   /* v1.6: 모바일에서도 종목명 표시 유지 (word-break 로 자동 줄바꿈). */
   .cal-chip { padding: 2px 4px; font-size: 10px; }
-  .cal-chip .chip-type { font-size: 9px; padding: 0 3px; }
   .cal-wh { padding: 6px 2px; font-size: 11px; }
   .cal-date { font-size: 11px; }
   .cal-month { font-size: 16px; margin-left: 4px; }
@@ -667,27 +650,7 @@ table.checklist-table tbody tr.result-info   { background: #fcfcff; }
 .reasons li { margin: 4px 0; }
 .reasons-reject li { color: var(--reject); }
 
-.deposit-form {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 12px;
-  margin-bottom: 8px;
-}
-.deposit-form input { width: 100px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 4px; }
-.deposit-form button {
-  padding: 6px 14px;
-  border: 0;
-  background: var(--accent);
-  color: #fff;
-  border-radius: 4px;
-  cursor: pointer;
-}
-.deposit-form button:hover { background: #1958b6; }
-.deposit-result { font-size: 15px; }
+/* v1.6 (#26-7): 균등 증거금 폼 폐지 — .deposit-form, .deposit-result 삭제. */
 
 .sources { padding-left: 20px; }
 .sources li { margin: 4px 0; }

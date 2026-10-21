@@ -116,7 +116,8 @@ const summaries: IpoSummary[] = [
     band_high: 23000,
     final_price: 23000,
     // v1.0: lockup null → INCOMPLETE (0점 처리 폐지)
-    verdict: { status: 'INCOMPLETE', grade: null, score: null, correction: null, score_range: null },
+    // v1.6 (#26-4): INCOMPLETE 지만 범위 계산 가능 — comp 35+price 20 확정 = 55, 미확인 lockup+flow 가 0~40 → total 55~95.
+    verdict: { status: 'INCOMPLETE', grade: null, score: null, correction: null, score_range: { min: 55, max: 95 } },
     price_confirm_date: '2026-10-26',
     demand_forecast_start: '2026-10-23',
     demand_forecast_end: '2026-10-24',
@@ -441,6 +442,8 @@ const seed: Record<string, DetailSeed> = {
     ],
     underwriters: ['신한투자증권', '삼성증권'],
   },
+  // v1.6 (#26-4): INCOMPLETE 픽스처에 score_range 설정 — 가능 범위 "가장 보수적 ~ 가장 낙관적".
+  // 미확인 지표의 min/max 를 가정해 계산 (각 지표가 0~최대일 때 total 범위).
   [INCOMPLETE_LOCKUP_ID]: {
     ...summaries.find(s => s.id === INCOMPLETE_LOCKUP_ID)!,
     indicators: {
@@ -1004,6 +1007,7 @@ let collectState: CollectStatus = {
   summary: null,
   error: null,
   last_collected_at: '2026-10-16T11:50:00+09:00',
+  failures: [],
 }
 let collectTimer: ReturnType<typeof setInterval> | null = null
 
@@ -1017,6 +1021,7 @@ function startMockCollect(): void {
     summary: null,
     error: null,
     last_collected_at: collectState.last_collected_at,
+    failures: [],
   }
   let done = 0
   collectTimer = setInterval(() => {
@@ -1034,11 +1039,15 @@ function startMockCollect(): void {
           new_count: 2,
           updated_count: 3,
           unchanged_count: 1,
-          failed_count: 0,
+          failed_count: 1,
           withdrawn_count: 0,
         },
         error: null,
         last_collected_at: finished,
+        // v1.3 샘플: 실패 종목 1건.
+        failures: [
+          { corp_code: '00990001', corp_name: '(샘플) 나라AI', reason: '원문 파싱 실패 — 공모 금액 섹션을 찾을 수 없음' },
+        ],
       }
       if (collectTimer) { clearInterval(collectTimer); collectTimer = null }
     }

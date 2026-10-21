@@ -156,6 +156,23 @@ export function CollectBar({ onSucceeded }: Props) {
         </span>
       </div>
 
+      {/* v1.3 (#26-3): 수집 완료 후 실패 종목·사유 접이식 목록 */}
+      {(collect?.status === 'SUCCEEDED' || collect?.status === 'FAILED') &&
+        collect.failures != null && collect.failures.length > 0 && (
+          <details className="collect-failures">
+            <summary>실패 종목 {collect.failures.length}건 보기</summary>
+            <ul>
+              {collect.failures.map((f, i) => (
+                <li key={i}>
+                  <strong>{f.corp_name}</strong>
+                  <code> ({f.corp_code})</code>
+                  <span> — {f.reason}</span>
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
+
       {showKeyPrompt && (
         <form className="key-prompt" onSubmit={onSubmitKey}>
           <p className="key-prompt-head">

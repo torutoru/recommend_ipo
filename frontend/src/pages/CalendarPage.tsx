@@ -62,6 +62,9 @@ function buildEventMap(items: IpoSummary[]): Map<string, CalEvent[]> {
       }
     } else if (it.subscription_start) {
       push(it.subscription_start, { item: it, type: 'SUBSCRIPTION' })
+    } else if (it.subscription_end) {
+      // v1.6 (#26-8): 시작일 null·종료일만 있는 종목도 종료일 기준으로 칩 생성.
+      push(it.subscription_end, { item: it, type: 'SUBSCRIPTION' })
     }
     if (it.listing_date) {
       push(it.listing_date, { item: it, type: 'LISTING' })
