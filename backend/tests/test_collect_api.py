@@ -350,10 +350,11 @@ def _upsert(conn, **kw):
     store.upsert_ipo(conn, **defaults)
 
 
-def test_43_final_price_cleared_when_competition_rate_null(client):
-    """지시 #43 — competition_rate 가 새·기존 모두 null 이면 final_price 도 excluded 값(null)으로 교체.
+def test_46_indicators_replaced_by_excluded_on_normal_parse(client):
+    """지시 #46 ① — 정상 파싱 upsert 는 지표를 excluded 로 교체(null 포함).
 
-    아델 사례(가정문 23,445원 오파싱 → v24 parser 는 null 반환이지만 COALESCE 로 영구 보존되던 사고).
+    #43 의 CASE 로직은 #46 전면 교체로 자연 대체됨 — final_price 가 null 로 교체됨을 재확인.
+    아델 사례(가정문 23,445원 오파싱 보존 사고) 해소.
     """
     # 1회차: 과거 오파싱 상태 재현 — final_price=23445, competition_rate=None
     with store.connect() as conn:
@@ -373,30 +374,41 @@ def test_43_final_price_cleared_when_competition_rate_null(client):
     assert after["indicators"]["offering_amount_krw"] is None
 
 
-def test_43_final_price_preserved_when_competition_rate_present(client):
-    """지시 #43 — competition_rate 가 있으면 (수요예측 완료 상태) 기존 final_price 는 COALESCE 로 보존.
+def test_46_listing_date_market_preserved_when_not_from_issuance_report(client):
+    """지시 #46 ① 예외 — listing_date·market 는 전용 출처(실적보고서) 가 없으면 기존 값 유지.
 
-    데이터 보호 규칙 유지 — 다운로드·파싱 일시 실패에도 확정가 지워지지 않음.
+    발행조건확정 재파싱이 실적보고서 값(listing_date·market)을 null 로 지우지 않음을 보장.
     """
-    # 1회차: 정상 — competition_rate 와 final_price 모두 있음
     with store.connect() as conn:
-        _upsert(conn, corp_code="99999999", corp_name="테스트", market="KOSDAQ",
-                band_low=10000, band_high=15000, final_price=15000, price_position="TOP_OF_BAND",
-                competition_rate=2000.0, competition_rate_type="weighted",
-                demand_quantity=1000000, demand_amount_krw=15_000_000_000,
-                lockup_ratio=40.0, lockup_ratio_basis="allocated",
-                tradable_ratio=25.0, old_share_ratio=0.0,
-                new_share_count=1000000, old_share_count=0,
-                total_offering_count=1000000, offering_amount_krw=15_000_000_000,
-                report_rcept_no="20261020000001", parser_version="v24",
-                price_confirm_date="2026-10-20")
-    # 2회차: parser 가 일시적 null — competition_rate 기존 보존 → CASE else 분기 → final_price COALESCE 보존
+        _upsert(conn, corp_code="99998888", corp_name="테스트", market="KOSDAQ",
+                listing_date="2026-11-20", parser_version="v25")
+    before = client.get("/api/ipos/99998888").json()
+    assert before["listing_date"] == "2026-11-20"
+    assert before["market"] == "KOSDAQ"
+    # 2회차: 발행조건확정 재파싱(실적보고서 값 없음) — listing_date·market 모두 null 로 넘김
     with store.connect() as conn:
-        _upsert(conn, corp_code="99999999", corp_name="테스트", market="KOSDAQ",
-                report_rcept_no="20261020000001", parser_version="v25")
-    after = client.get("/api/ipos/99999999").json()
-    assert after["final_price"] == 15000
-    assert after["indicators"]["competition_rate"] == 2000.0
+        _upsert(conn, corp_code="99998888", corp_name="테스트",
+                market=None, listing_date=None,
+                parser_version="v26")
+    after = client.get("/api/ipos/99998888").json()
+    assert after["listing_date"] == "2026-11-20"  # COALESCE 보호
+    assert after["market"] == "KOSDAQ"
+
+
+def test_46_underwriters_preserved_when_estkRs_fetch_absent(client):
+    """지시 #46 ① 예외 — underwriters_json 는 estkRs 조회 결과가 없으면 기존 값 유지."""
+    with store.connect() as conn:
+        _upsert(conn, corp_code="99997777", corp_name="테스트",
+                underwriters_json='["한국투자증권", "미래에셋증권"]',
+                parser_version="v25")
+    before = client.get("/api/ipos/99997777").json()
+    assert "한국투자증권" in before["underwriters"]
+    # 2회차: estkRs 조회 실패 → underwriters_json null 로 넘김
+    with store.connect() as conn:
+        _upsert(conn, corp_code="99997777", corp_name="테스트",
+                underwriters_json=None, parser_version="v26")
+    after = client.get("/api/ipos/99997777").json()
+    assert "한국투자증권" in after["underwriters"]  # COALESCE 보호
 
 
 def test_45_crtfc_key_masked_in_parse_warnings_startup(client):

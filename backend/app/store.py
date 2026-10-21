@@ -195,46 +195,36 @@ def upsert_ipo(
             correction_requested_at, correction_amended_at, underwriters_json, updated_at
         ) VALUES (?,?,?,?,?,?, ?,?,?,?, ?,?,?,?, ?,?,?,?, ?,?,?,?,?, ?,?,?,?, ?,?,?,?)
         ON CONFLICT(corp_code) DO UPDATE SET
-            -- 지시 #22: 재파싱이 기존 데이터를 null 로 덮는 사고 방지.
-            -- excluded.col IS NOT NULL 일 때만 교체. corp_name·updated_at·parser_version 은 항상 갱신.
+            -- 지시 #46 ① (사용자 결정 2026-10-21, requirements 22장):
+            -- 정상 파싱(upsert 호출 자체가 성공 경로)이면 지표·일정은 **excluded 로 교체**(null 포함).
+            -- 다운로드/파싱 실패 보호는 호출자가 upsert skip 분기로 이미 처리.
+            -- 예외: listing_date·market·underwriters_json 는 전용 출처(실적보고서·estkRs)에서만 오므로
+            --       호출자가 null 을 넘기면 기존 값 유지(COALESCE 로 보호).
             corp_name=excluded.corp_name,
             market                = COALESCE(excluded.market, ipos.market),
-            subscription_start    = COALESCE(excluded.subscription_start, ipos.subscription_start),
-            subscription_end      = COALESCE(excluded.subscription_end, ipos.subscription_end),
+            subscription_start    = excluded.subscription_start,
+            subscription_end      = excluded.subscription_end,
             listing_date          = COALESCE(excluded.listing_date, ipos.listing_date),
-            band_low              = COALESCE(excluded.band_low, ipos.band_low),
-            band_high             = COALESCE(excluded.band_high, ipos.band_high),
-            -- 지시 #43: final_price 는 수요예측 결과와 한 묶음. competition_rate 가 새·기존 모두
-            -- null 이면(수요예측 결과 미공시 상태) final_price 도 excluded 값(null 포함)으로 교체.
-            -- 과거 오파싱 값(아델 가정문 '23,445원 이상')이 COALESCE 로 영구 보존되는 사고 방지.
-            final_price           = CASE
-                WHEN COALESCE(excluded.competition_rate, ipos.competition_rate) IS NULL
-                THEN excluded.final_price
-                ELSE COALESCE(excluded.final_price, ipos.final_price)
-            END,
-            -- 지시 #29: price_position 은 final_price + band 로부터 파생 → **excluded 교체**(null 포함)
+            band_low              = excluded.band_low,
+            band_high             = excluded.band_high,
+            final_price           = excluded.final_price,
             price_position        = excluded.price_position,
-            competition_rate      = COALESCE(excluded.competition_rate, ipos.competition_rate),
-            competition_rate_type = COALESCE(excluded.competition_rate_type, ipos.competition_rate_type),
-            demand_quantity       = COALESCE(excluded.demand_quantity, ipos.demand_quantity),
-            -- 지시 #29: demand_amount_krw 는 demand_quantity × final 파생 → **excluded 교체**
+            competition_rate      = excluded.competition_rate,
+            competition_rate_type = excluded.competition_rate_type,
+            demand_quantity       = excluded.demand_quantity,
             demand_amount_krw     = excluded.demand_amount_krw,
-            lockup_ratio          = COALESCE(excluded.lockup_ratio, ipos.lockup_ratio),
-            lockup_ratio_basis    = COALESCE(excluded.lockup_ratio_basis, ipos.lockup_ratio_basis),
-            tradable_ratio        = COALESCE(excluded.tradable_ratio, ipos.tradable_ratio),
-            -- 지시 #29: old_share_ratio 는 old / total 파생 → **excluded 교체**
+            lockup_ratio          = excluded.lockup_ratio,
+            lockup_ratio_basis    = excluded.lockup_ratio_basis,
+            tradable_ratio        = excluded.tradable_ratio,
             old_share_ratio       = excluded.old_share_ratio,
-            new_share_count       = COALESCE(excluded.new_share_count, ipos.new_share_count),
-            old_share_count       = COALESCE(excluded.old_share_count, ipos.old_share_count),
-            total_offering_count  = COALESCE(excluded.total_offering_count, ipos.total_offering_count),
-            -- 지시 #29: offering_amount_krw 는 total × final 파생 → **excluded 교체**(null 포함)
+            new_share_count       = excluded.new_share_count,
+            old_share_count       = excluded.old_share_count,
+            total_offering_count  = excluded.total_offering_count,
             offering_amount_krw   = excluded.offering_amount_krw,
-            report_rcept_no       = COALESCE(excluded.report_rcept_no, ipos.report_rcept_no),
-            price_confirm_date    = COALESCE(excluded.price_confirm_date, ipos.price_confirm_date),
-            demand_forecast_start = COALESCE(excluded.demand_forecast_start, ipos.demand_forecast_start),
-            demand_forecast_end   = COALESCE(excluded.demand_forecast_end, ipos.demand_forecast_end),
-            -- 지시 #32: correction 메타는 **매 수집마다 재계산** 되는 파생값 → excluded 로 교체(null 포함).
-            -- COALESCE 보호를 두면 CORRECTION 해제 조건이 성립해도 과거 값이 남아 상태가 안 바뀜.
+            report_rcept_no       = excluded.report_rcept_no,
+            price_confirm_date    = excluded.price_confirm_date,
+            demand_forecast_start = excluded.demand_forecast_start,
+            demand_forecast_end   = excluded.demand_forecast_end,
             correction_requested_at = excluded.correction_requested_at,
             correction_amended_at   = excluded.correction_amended_at,
             underwriters_json       = COALESCE(excluded.underwriters_json, ipos.underwriters_json),
