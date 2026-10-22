@@ -790,6 +790,34 @@ def test_extract_final_price_가정문_뒤_확정문_선택():
     assert extract_final_price(text) == 15_000
 
 
+def test_extract_final_price_rejects_결정될_경우():
+    """지시 #45 ②-3: 접미사 확장 — "결정될 경우" 도 거부(40자 window)."""
+    from app.parser import extract_final_price
+    text = "<P>확정공모가액이 10,000원으로 결정될 경우 보상금을 지급한다.</P>"
+    assert extract_final_price(text) is None
+
+
+def test_extract_final_price_multiple_valid_candidates_differ_null():
+    """지시 #45 ②-3: 유효 후보가 2개 이상이고 값이 다르면 null (추정 금지)."""
+    from app.parser import extract_final_price
+    text = (
+        "<P>확정공모가액은 15,000원으로 결정되었습니다. "
+        "확정공모가액은 20,000원 이었습니다.</P>"
+    )
+    assert extract_final_price(text) is None
+
+
+def test_extract_final_price_multiple_same_values_one_returned():
+    """유효 후보 값이 모두 동일하면 그 값 반환."""
+    from app.parser import extract_final_price
+    text = (
+        "<P>확정공모가액은 15,000원으로 결정되었습니다. "
+        "본 확정공모가액 15,000원 기준.</P>"
+    )
+    # 두 번째가 가정 접미사 없으므로 유효. 둘 다 15000 → 15000
+    assert extract_final_price(text) == 15_000
+
+
 # ---------------- 지시 #42: 실제 원문 캐시 회귀 fixture (daily-check) ----------------
 
 import pytest  # noqa: E402  (파일 상단에 이미 import 되었다면 중복이지만 harmless)
@@ -878,6 +906,77 @@ class TestRealCorpus:
     def test_넥스아이_tradable_ratio(self):
         from app.parser import extract_tradable_ratio
         assert extract_tradable_ratio(_load_cached("20261016000268")) == 37.03
+
+    # ---- 지시 #48 회귀 고정 — offering_amount_krw 가 1주 가격으로 매치되지 않음 ----
+    #    기대값: HEAD(v28) 와 동일한 억 단위 공모 금액 (수십억~수천억)
+    def test_48_offering_amount_엘리스_투자설명서(self):
+        from app.parser import extract_offering_amount_krw
+        v = extract_offering_amount_krw(_load_cached("20261006000451"))
+        assert v == 201_091_000_000  # 2,010억
+
+    def test_48_offering_amount_20261012000323(self):
+        from app.parser import extract_offering_amount_krw
+        assert extract_offering_amount_krw(_load_cached("20261012000323")) == 37_891_589_000
+
+    def test_48_offering_amount_티앤이_투자설명서(self):
+        from app.parser import extract_offering_amount_krw
+        assert extract_offering_amount_krw(_load_cached("20261016000162")) == 30_240_000_000
+
+    def test_48_offering_amount_20261020000365(self):
+        from app.parser import extract_offering_amount_krw
+        import os
+        if not (CACHE_DIR / "20261020000365.txt").exists():
+            import pytest as _pt
+            _pt.skip("cache 파일 없음")
+        assert extract_offering_amount_krw(_load_cached("20261020000365")) == 19_000_000_000
+
+    def test_48_offering_amount_not_1share_price_엘리스(self):
+        """회귀 재발 방지 — 확정 공모가(90,500원) 가 공모 금액으로 반환되지 않음을 명시 체크."""
+        from app.parser import extract_offering_amount_krw
+        v = extract_offering_amount_krw(_load_cached("20261006000451"))
+        assert v is None or v > 1_000_000_000  # 1주 가격(90,500) 수준이면 fail
+
+    def test_49_영광_tradable_ratio_partial_skipped(self):
+        """지시 #49 영광 — 벤처금융 BK 가 보유한 6.75% 부분값 skip, 전체 31.75% 반환."""
+        from app.parser import extract_tradable_ratio
+        assert extract_tradable_ratio(_load_cached("20261021000239")) == 31.75
+
+
+def test_49_demand_result_label_with_footnote():
+    """지시 #49 래블업 — 수요예측 결과 "경쟁률(주2)" 각주 표기 라벨 수용."""
+    from app.parser import extract_demand_result
+    xml = (
+        "<TABLE><TR><TD>건수</TD><TD>10</TD><TD>20</TD><TD>합계</TD></TR>"
+        "<TR><TD>경쟁률(주2)</TD><TD>8.35</TD><TD>131.79</TD><TD>284.53</TD></TR>"
+        "</TABLE>"
+    )
+    r = extract_demand_result(xml)
+    assert r["competition_rate"] == 284.53
+
+
+def test_49_demand_result_label_space_footnote():
+    """공백 포함 각주 "경쟁률 (주 2)" 변형도 수용."""
+    from app.parser import extract_demand_result
+    xml = (
+        "<TABLE><TR><TD>경쟁률 (주 2)</TD><TD>10.0</TD><TD>5.5</TD><TD>100.5</TD></TR>"
+        "</TABLE>"
+    )
+    r = extract_demand_result(xml)
+    assert r["competition_rate"] == 100.5
+
+
+def test_49_rows_with_label_rejects_different_content():
+    """각주 아닌 추가 글자 ("경쟁률분석") 는 거부 — 오매치 방지."""
+    from app.parser import _rows_with_label
+    xml = (
+        "<TABLE><TR><TD>경쟁률분석</TD><TD>부적합</TD></TR>"
+        "<TR><TD>경쟁률(주2)</TD><TD>284.53</TD></TR>"
+        "</TABLE>"
+    )
+    rows = _rows_with_label(xml, "경쟁률")
+    # "경쟁률분석" 은 거부되고 "경쟁률(주2)" 만 통과해야
+    assert len(rows) == 1
+    assert rows[0][-1] == "284.53"
 
     # 엘리스 lockup 는 캐시 포맷이 strip_tags 된 상태(테이블 구조 손실) 라
     # 테이블 집계 기반 extract_lockup 로는 재현 어려움. v23 통합 테스트가 lockup 커버.

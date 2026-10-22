@@ -129,9 +129,9 @@ _RE_FINAL_PRICE_PATTERNS = [
 ]
 
 # 지시 #40 (아델): "확정공모가액이 N원 이상으로 결정되어 … 경우" 같은 **가정·조건 문장**은 제외.
-# 매치된 "N원" 바로 뒤 20자 안에 아래 접미가 오면 조건문으로 간주하고 skip.
+# 지시 #45 ②-3: 접미사 범위 40자로 확대, "경우|될|라면|가정|이상|이하" 포함 ('N원으로 결정될 경우' 도 커버).
 _RE_FINAL_PRICE_ASSUMPTION_SUFFIX = re.compile(
-    r"\s*(?:이상|이하|미만|초과|경우|되어|되는|이라면|이라고|기준으로\s*(?:산정|계산))"
+    r"[^\d]{0,40}(?:이상|이하|미만|초과|경우|될|라면|가정|되어|되는|기준으로\s*(?:산정|계산))"
 )
 
 
@@ -140,16 +140,28 @@ def extract_final_price(xml: str) -> Optional[int]:
 
     지시 #40: 조건문 "확정공모가액이 N원 이상으로 결정되어 … 경우" 는 가정 서술이므로 제외한다
     (아델 사례 — 상장주선인 의무보유 주석의 가정문을 확정가로 오인).
+    지시 #45 ②-3: 모든 패턴 후보를 **위치순** 으로 모으고 유효 다중이 값이 다르면 null + warning.
+    지시 #45 ②-1: 정정 신고서 서두 정정표(옛/새 가격 비교) 영역은 제외하고 본문만 탐색.
     """
-    text = _strip_tags(xml)
+    text = _extract_body_text(_strip_tags(xml))
+    candidates: list[tuple[int, int]] = []  # (position, value)
     for pat in _RE_FINAL_PRICE_PATTERNS:
-        # finditer 로 전수 탐색 — 가정문 접미사 window 검사 후 유효한 매치만 수용
         for m in pat.finditer(text):
-            tail = text[m.end():m.end() + 20]
+            tail = text[m.end():m.end() + 40]
             if _RE_FINAL_PRICE_ASSUMPTION_SUFFIX.match(tail):
                 continue  # 가정·조건문 — skip
-            return _to_int(m.group(1))
-    return None
+            v = _to_int(m.group(1))
+            if v is not None:
+                candidates.append((m.start(), v))
+    if not candidates:
+        return None
+    # 위치순 정렬 + 유효 다중 값 상이 → null
+    candidates.sort(key=lambda t: t[0])
+    unique_values = {v for _, v in candidates}
+    if len(unique_values) > 1:
+        # 상이한 유효 후보 → null (warning 은 parse() 가 추가)
+        return None
+    return candidates[0][1]
 
 
 def classify_price_position(
@@ -184,15 +196,26 @@ _RE_CELL = re.compile(
 
 
 def _rows_with_label(xml: str, label: str) -> list[list[str]]:
-    """첫 셀 텍스트가 label 과 같은 모든 행의 셀 배열."""
+    """첫 셀 텍스트가 label 과 같은 모든 행의 셀 배열.
+
+    지시 #49: 각주 표기("경쟁률(주2)")·공백 허용 — 첫 셀 텍스트가 label 로 시작하고
+    남은 부분이 공백 또는 "(주N)"·"(주)" 같은 각주 패턴이면 매치.
+    """
     out: list[list[str]] = []
     for tr in _RE_ROW.finditer(xml):
         cells_raw = _RE_CELL.findall(tr.group("body"))
         if not cells_raw:
             continue
         cells = [_strip_tags(c) for c in cells_raw]
-        if cells[0] == label:
+        head = cells[0]
+        if head == label:
             out.append(cells)
+            continue
+        if head.startswith(label):
+            tail = head[len(label):].strip()
+            # "(주)"·"(주2)"·"(주 2)" 같은 각주 or 공백만 → 라벨 일치로 간주
+            if not tail or re.fullmatch(r"\(\s*주\s*\d*\s*\)", tail):
+                out.append(cells)
     return out
 
 
@@ -366,11 +389,13 @@ _RE_TRADABLE_RATIO_TABLE = re.compile(
     r"유통\s*가능물량[^가-힣%]{0,300}?([\d]+[.,]?\d+)\s*%"
 )
 
-# 지시 #39: 부분값 서술 라벨 — "기존 주주의 유통가능", "상장 전 유통가능", "공모주주 유통가능" 등은
-# 전체 유통 비율이 아니라 부분값(씨앤엠 36.25% = 기존 주주의 유통가능 물량). 매치 window 안에
-# 이런 라벨이 있으면 skip 하고 다음 매치 후보로 넘어간다.
+# 지시 #39: 부분값 서술 라벨 — "기존 주주의 유통가능", "상장 전 유통가능" 등은 전체 유통 비율 아님.
+# 지시 #49: 영광 사례 — "벤처금융 BK…가 보유한 610,800주(공모 후 6.75%)는 보호예수기간이 설정되어
+# 있지 아니…" 서술은 특정 주주의 부분값. 힌트에 "~가 보유한" / "보호예수기간이 설정되어 있지 아니"
+# / "벤처금융" 추가. "이를 제외한 … 유통 가능한 물량" 같은 전체값 서술이 뒤에 오면 매치.
 _RE_PARTIAL_FLOW_HINT = re.compile(
     r"기존\s*주주|상장\s*전\s*유통|보호예수\s*제외|공모주주\s*유통"
+    r"|가\s*보유한|보호예수기간이?\s*설정되어\s*있지\s*아니|벤처금융"
 )
 
 
@@ -429,8 +454,9 @@ def extract_tradable_ratio(xml: str) -> Optional[float]:
 
     지시 #39: 매치 window 안에 "기존 주주" 등 부분값 라벨이 있으면 skip 하고
     다음 유효 매치를 찾는다. 씨앤엠(36.25% 부분값 → 45.75% 전체) 복구.
+    지시 #45 ②-1: 정정 신고서 서두 정정표 영역 skip — 본문에서만 탐색.
     """
-    text = _strip_tags(xml)
+    text = _extract_body_text(_strip_tags(xml))
     for pattern in (
         _RE_TRADABLE_RATIO_NARRATIVE,
         _RE_TRADABLE_RATIO_NARRATIVE_PAREN,
@@ -685,7 +711,13 @@ _RE_OFFERING_AMOUNT = re.compile(
 
 
 def extract_offering_amount_krw(xml: str) -> Optional[int]:
-    """원문의 '모집(매출) 총액' 명시 값만 반환. 추정 금지 — 호출자가 fallback 처리."""
+    """원문의 '모집(매출) 총액' 명시 값만 반환. 추정 금지 — 호출자가 fallback 처리.
+
+    지시 #48: 본문 추출(_extract_body_text) 적용 회귀 — "모집(매출)총액" 라벨이 서두 정정표에만
+    있고 본문에는 "모집가액" 열 같은 다른 표에만 있어, `_RE_OFFERING_AMOUNT` 가 1주 가격을
+    매치해 2,010억 → 90,500원 같은 치명적 오류 발생. 공모 금액은 정정표에서 바뀌는 일이
+    거의 없으므로 **본문 추출 미적용**(전체 텍스트에서 탐색) 원래 동작으로 유지.
+    """
     m = _RE_OFFERING_AMOUNT.search(_strip_tags(xml))
     if not m:
         return None
@@ -697,8 +729,9 @@ def extract_offering_counts(xml: str) -> dict:
 
     지시 #38: 범위 검증을 수행한다 — 음수·total 초과·합 불일치는 추정 금지(null).
     지시 #39: "구주매출 없이" 등 명시 서술이 있으면 old=0 강제 (regex 오매치 보호).
+    지시 #45 ②-1: 정정 신고서 서두 정정표 영역 skip — 본문에서만 탐색.
     """
-    text = _strip_tags(xml)
+    text = _extract_body_text(_strip_tags(xml))
     new = old = total = None
     warnings: list[str] = []
 

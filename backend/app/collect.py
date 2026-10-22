@@ -76,7 +76,11 @@ DART_URL = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo="
 #   v26 — 지시 #46 ① (COALESCE 축소 — 정상 파싱이면 지표/일정 excluded 교체, listing_date·market·underwriters 는 전용 출처 보호)
 #   v27 — 지시 #45 ② 묶음1 (쉼표 단독 매치 방지·청약 종료 연도 생략·INCOMPLETE 한글 라벨·_is_incomplete 삭제)
 #   v28 — 지시 #45 ②-4 (flow 범위 좁힘 — tradable null 이어도 구주 확정이면 좁은 범위 반환)
-PARSER_VERSION = "v28"
+#   v29 — 지시 #45 ②-3 (확정가 다중 후보 수집 + 가정문 접미사 확장[경우|될|라면|가정|이상|이하] + 유효 다중 상이값 null)
+#   v30 — 지시 #45 ②-1 (본문 추출 확대: tradable·offering counts·offering amount·final_price. lockup 는 HTML 구조 유지로 미적용)
+#   v31 — 지시 #48 (extract_offering_amount_krw 본문 추출 회귀 원복 — 1주 가격 오매치 사고 해소)
+#   v32 — 지시 #49 (수요예측 라벨 각주 "(주N)" 수용 — 래블업 / 유통 부분값 힌트 확장 — 영광)
+PARSER_VERSION = "v32"
 
 
 # ---------- 분류 ----------
