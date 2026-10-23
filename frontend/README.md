@@ -15,6 +15,13 @@ npm run preview    # 빌드 결과물 로컬 미리보기
 
 Vite 가 `/api` 요청을 `http://localhost:8000` (backend FastAPI) 로 프록시합니다. backend 는 `localhost:5173` 을 CORS 허용해야 합니다.
 
+## 테마 — 항상 다크 (v1.9, #27)
+
+- 라이트 모드·전환 UI 없음. `index.html` 의 `<meta name="color-scheme" content="dark">` 로 폼 컨트롤·스크롤바까지 다크.
+- 모든 밝은 색은 `styles.css` 의 `:root` 토큰(`--bg`·`--panel`·`--surface`·`--surface-weak`·`--border`·`--fg`·`--fg-mute`·각 상태 `-weak`/`-border`·체크리스트 `--row-*`/`--result-*-bg/fg/border`)으로 집중. 하드코딩 금지.
+- 본문·보조 글자·결과 배지·링크 전부 WCAG AA(4.5:1) 이상 대비.
+- 칩·등급 색은 브랜드 유지(S/A/B 파랑·REJECT 빨강·대기/정정 회색·상장 주황·판정 보류 보라).
+
 ## 화면 구성
 
 | 경로 | 화면 |
@@ -28,14 +35,15 @@ Vite 가 `/api` 요청을 `http://localhost:8000` (backend FastAPI) 로 프록�
 ### 달력 칩 규칙 (requirements 18장)
 
 - **본문은 회사명만** — "청약"·"상장"·등급(S/A/B/보류/비추천/대기/정정) 글자는 넣지 않음. 접근성은 `title`/`aria-label` 에 "회사명 · 청약 · 추천 A" 로 제공.
-- **상장 칩**: 판정과 무관하게 **초록 단색** + 본문 접두사 `(상장) 회사명`. 점선 테두리 없음.
+- **상장 칩**: 판정과 무관하게 **주황 단색** + 본문 접두사 `(상장) 회사명`. 점선 테두리 없음.
 - **상태별 색** (칩 배경, WCAG AA 이상 대비):
   - PASS S — 진한 파랑 `#1a5fb4`
   - PASS A — 파랑 `#1c71d8`
   - PASS B — 연한 파랑 `#a4c8ff` + 어두운 글자
-  - INCOMPLETE — 주황 `#b45309`
+  - INCOMPLETE — 보라 `#6f42c1`
   - REJECT — 빨강 `#a3251b`
   - PENDING·CORRECTION — 짙은 회색 `#5f6b7a` + 흰 글자
+  - 상장 — 주황 `#b45309`
 - **셀 내 정렬 우선순위**: S > A > B > INCOMPLETE > REJECT > PENDING > CORRECTION. 같은 등급 안에서는 입력 순(안정 정렬).
 - **CORRECTION 숨김**: 셀에 non-correction 이벤트가 하나라도 있으면 CORRECTION 칩은 셀에서 숨기고 "+N 더보기" 에만 포함. 셀에 CORRECTION 만 있으면 그대로 노출.
 - **클릭**: 칩은 non-interactive(span). 날짜 셀 어디를 눌러도 하단 **선택 날짜 패널**이 열림. 패널의 종목 항목만 상세 페이지로 이동. 키보드 Tab/Enter·Space 로 셀 포커스 선택 가능.

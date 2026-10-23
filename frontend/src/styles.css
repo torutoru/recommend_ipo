@@ -1,33 +1,58 @@
 :root {
-  --fg: #1b2733;
-  --fg-mute: #6b7a8c;
-  --bg: #f6f8fb;
-  --panel: #ffffff;
-  --border: #dde3ec;
-  --accent: #1f6feb;
-  --accent-weak: #e8f0ff;
-  --pass: #137752;
-  --pass-weak: #e2f4ec;
-  --reject: #a3251b;
-  --reject-weak: #fbe4e1;
-  --pending: #946800;
-  --pending-weak: #fdf3dd;
-  --correction: #c15a00;
-  --correction-weak: #ffe4c4;
-  --incomplete: #5f3dc4;
-  --incomplete-weak: #ece6ff;
-  /* v1.6 (#20) — 달력 chip 전용 색 (WCAG AA 수준 대비).
-     진한 파랑/파랑/연한 파랑 (PASS S/A/B) · 주황 (INCOMPLETE) · 빨강 (REJECT) · 회색 (PENDING·CORRECTION).
-     연한 파랑과 회색은 "어두운 글자" 로 대비 유지. */
-  --chip-pass-s-bg:     #1a5fb4;  --chip-pass-s-fg:     #ffffff;  /* contrast 7.9:1 AAA */
-  --chip-pass-a-bg:     #1c71d8;  --chip-pass-a-fg:     #ffffff;  /* contrast 4.6:1 AA  */
-  --chip-pass-b-bg:     #a4c8ff;  --chip-pass-b-fg:     #0a2b57;  /* contrast 7.5:1 AAA */
-  --chip-incomplete-bg: #b45309;  --chip-incomplete-fg: #ffffff;  /* contrast 5.0:1 AA  */
-  --chip-reject-bg:     #a3251b;  --chip-reject-fg:     #ffffff;  /* contrast 6.5:1 AAA */
-  /* v1.7 (#21): 회색을 더 짙게 — 흰 바탕에서 또렷하게. 흰 글씨 사용. */
-  --chip-neutral-bg:    #5f6b7a;  --chip-neutral-fg:    #ffffff;  /* contrast 5.9:1 AA  */
-  /* v1.8 (#21 5번): 상장 전용 초록 — 판정 색과 겹치지 않게. */
-  --chip-listing-bg:    #2e7d32;  --chip-listing-fg:    #ffffff;  /* contrast 4.9:1 AA  */
+  /* v1.9 (#27): 항상 다크 모드. 라이트 전환 없음. 모든 밝은 색은 토큰화. */
+  color-scheme: dark;
+
+  --fg: #e4ebf5;
+  --fg-mute: #94a3b8;
+  --bg: #0b121c;
+  --panel: #141c28;
+  --surface: #1a2332;        /* 테이블 머리·셀 호버 (구 #f1f4f9 대체) */
+  --surface-weak: #121a26;   /* off-month·result-unknown 행 (구 #fafbfc 대체) */
+  --border: #2a3545;
+
+  --accent: #5a9dfd;
+  --accent-weak: #15253f;
+  --accent-hover: #7fb3fe;
+
+  --pass: #2fb47b;
+  --pass-weak: #0f2e23;
+  --pass-border: #185a3f;
+  --reject: #ef6b63;
+  --reject-weak: #3a1a18;
+  --reject-border: #693532;
+  --pending: #e3b64d;
+  --pending-weak: #2d2415;
+  --pending-border: #5a4820;
+  --correction: #ef8b3a;
+  --correction-weak: #3a2510;
+  --correction-border: #5c3d1b;
+  --incomplete: #a98cfa;
+  --incomplete-weak: #251c40;
+  --incomplete-border: #3f3368;
+
+  /* 체크리스트 행 배경 (구 #f3fbf6·#fdf4f2·#fafbfc·#fcfcff 대체) */
+  --row-met: #0f2e23;
+  --row-notmet: #2a1715;
+  --row-unknown: #141b26;
+  --row-info: #15253f;
+
+  /* 체크리스트 결과 배지 (구 #ddf3e4 등 대체 — 다크 톤 + 밝은 글자) */
+  --result-met-bg: #15402e;         --result-met-fg: #6ee6a9;         --result-met-border: #1d5a3f;
+  --result-met-good-bg: #1d5a3f;    --result-met-good-fg: #a4ebc2;    --result-met-good-border: #2fb47b;
+  --result-met-very-good-bg: #2fb47b; --result-met-very-good-fg: #06120d; --result-met-very-good-border: #2fb47b;
+  --result-notmet-bg: #4a1f1b;      --result-notmet-fg: #ff8d85;      --result-notmet-border: #693532;
+  --result-unknown-bg: #1a2332;     --result-unknown-fg: #94a3b8;     --result-unknown-border: #3a4555;
+  --result-info-bg: #15253f;        --result-info-fg: #7fb3fe;        --result-info-border: #22365c;
+
+  /* v1.6 (#20) — 달력 chip 색. v1.9 (#27): 상장 주황·보류 보라로 교체. 나머지는 브랜드 유지. */
+  --chip-pass-s-bg:     #1a5fb4;  --chip-pass-s-fg:     #ffffff;
+  --chip-pass-a-bg:     #1c71d8;  --chip-pass-a-fg:     #ffffff;
+  --chip-pass-b-bg:     #a4c8ff;  --chip-pass-b-fg:     #0a2b57;
+  --chip-incomplete-bg: #6f42c1;  --chip-incomplete-fg: #ffffff;  /* v1.9 (#27): 보라 */
+  --chip-reject-bg:     #a3251b;  --chip-reject-fg:     #ffffff;
+  --chip-neutral-bg:    #5f6b7a;  --chip-neutral-fg:    #ffffff;
+  --chip-listing-bg:    #b45309;  --chip-listing-fg:    #ffffff;  /* v1.9 (#27): 주황 */
+
   --radius: 8px;
 }
 
@@ -122,7 +147,7 @@ table.ipo-table th, table.ipo-table td {
   font-size: 13px;
 }
 table.ipo-table thead th {
-  background: #f1f4f9;
+  background: var(--surface);
   color: var(--fg-mute);
   font-weight: 600;
   font-size: 12px;
@@ -145,21 +170,21 @@ table.ipo-table tbody tr:hover { background: var(--accent-weak); }
   letter-spacing: 0.02em;
   border: 1px solid transparent;
 }
-.badge-pending { background: var(--pending-weak); color: var(--pending); border-color: #f0d794; }
-.badge-reject  { background: var(--reject-weak);  color: var(--reject);  border-color: #f0b2ab; }
-.badge-pass    { background: var(--pass-weak);    color: var(--pass);    border-color: #a4d9c1; }
+.badge-pending { background: var(--pending-weak); color: var(--pending); border-color: var(--pending-border); }
+.badge-reject  { background: var(--reject-weak);  color: var(--reject);  border-color: var(--reject-border); }
+.badge-pass    { background: var(--pass-weak);    color: var(--pass);    border-color: var(--pass-border); }
 .badge-correction {
   background: var(--correction-weak);
   color: var(--correction);
-  border-color: #f0b876;
+  border-color: var(--correction-border);
 }
 .badge-incomplete {
   background: var(--incomplete-weak);
   color: var(--incomplete);
-  border-color: #c9b9f0;
+  border-color: var(--incomplete-border);
 }
 .badge-grade-S { background: #0e5e40; color: #fff; border-color: #0e5e40; }
-.badge-grade-A { background: var(--pass); color: #fff; border-color: var(--pass); }
+.badge-grade-A { background: #137752; color: #fff; border-color: #137752; }
 .badge-grade-B { background: #d79a1e; color: #fff; border-color: #d79a1e; }
 .badge-grade-C { background: #8a6d2a; color: #fff; border-color: #8a6d2a; }
 
@@ -227,7 +252,7 @@ dl.meta dd { margin: 0; font-size: 14px; }
 
 .grade-table { border-collapse: collapse; margin-bottom: 20px; }
 .grade-table th, .grade-table td { padding: 6px 12px; border: 1px solid var(--border); font-size: 13px; }
-.grade-table th { background: #f1f4f9; color: var(--fg-mute); font-weight: 600; }
+.grade-table th { background: var(--surface); color: var(--fg-mute); font-weight: 600; }
 .score-footer { margin: 8px 0 0; color: var(--fg-mute); font-size: 12px; }
 .muted { color: var(--fg-mute); }
 
@@ -259,7 +284,7 @@ table.checklist-table th, table.checklist-table td {
   vertical-align: top;
 }
 table.checklist-table thead th {
-  background: #f1f4f9;
+  background: var(--surface);
   color: var(--fg-mute);
   font-weight: 600;
   font-size: 12px;
@@ -267,10 +292,10 @@ table.checklist-table thead th {
   letter-spacing: 0.03em;
 }
 table.checklist-table tbody tr:last-child td { border-bottom: 0; }
-table.checklist-table tbody tr.result-met    { background: #f3fbf6; }
-table.checklist-table tbody tr.result-notmet { background: #fdf4f2; }
-table.checklist-table tbody tr.result-unknown { background: #fafbfc; }
-table.checklist-table tbody tr.result-info   { background: #fcfcff; }
+table.checklist-table tbody tr.result-met    { background: var(--row-met); }
+table.checklist-table tbody tr.result-notmet { background: var(--row-notmet); }
+table.checklist-table tbody tr.result-unknown { background: var(--row-unknown); }
+table.checklist-table tbody tr.result-info   { background: var(--row-info); }
 
 .result-badge {
   display: inline-flex;
@@ -283,21 +308,21 @@ table.checklist-table tbody tr.result-info   { background: #fcfcff; }
   border: 1px solid transparent;
   white-space: nowrap;
 }
-.result-badge.result-met    { background: #ddf3e4; color: #0e5e40; border-color: #a4d9c1; }
-.result-badge.result-met.result-met-good      { background: #cdefd9; color: #0b5236; border-color: #86c7a4; }
-.result-badge.result-met.result-met-very-good { background: #0e5e40; color: #ffffff; border-color: #0e5e40; }
-.result-badge.result-notmet { background: #fbe4e1; color: #a3251b; border-color: #f0b2ab; }
-.result-badge.result-unknown { background: #e8ebf0; color: var(--fg-mute); border-color: #cfd4de; }
-.result-badge.result-info   { background: #e8f0ff; color: var(--accent); border-color: #cfdbf5; }
+.result-badge.result-met    { background: var(--result-met-bg); color: var(--result-met-fg); border-color: var(--result-met-border); }
+.result-badge.result-met.result-met-good      { background: var(--result-met-good-bg); color: var(--result-met-good-fg); border-color: var(--result-met-good-border); }
+.result-badge.result-met.result-met-very-good { background: var(--result-met-very-good-bg); color: var(--result-met-very-good-fg); border-color: var(--result-met-very-good-border); }
+.result-badge.result-notmet { background: var(--result-notmet-bg); color: var(--result-notmet-fg); border-color: var(--result-notmet-border); }
+.result-badge.result-unknown { background: var(--result-unknown-bg); color: var(--result-unknown-fg); border-color: var(--result-unknown-border); }
+.result-badge.result-info   { background: var(--result-info-bg); color: var(--result-info-fg); border-color: var(--result-info-border); }
 .result-icon { font-size: 14px; line-height: 1; }
 
 /* v1.6 (#26-7): 균등 증거금 폐지 — .deposit-* 블록 삭제. */
 
 /* Wake banner -------------------------------------------------------------- */
 .wake-banner {
-  background: #fff6e0;
-  color: #946800;
-  border-bottom: 1px solid #f0d794;
+  background: var(--pending-weak);
+  color: var(--pending);
+  border-bottom: 1px solid var(--pending-border);
   text-align: center;
   padding: 8px 12px;
   font-size: 13px;
@@ -328,8 +353,8 @@ table.checklist-table tbody tr.result-info   { background: #fcfcff; }
   font-size: 13px;
   min-width: 150px;
 }
-.collect-btn:hover:not(:disabled) { background: #1958b6; }
-.collect-btn:disabled { background: #c9d1dd; color: #6b7a8c; cursor: progress; }
+.collect-btn:hover:not(:disabled) { background: var(--accent-hover); }
+.collect-btn:disabled { background: var(--surface); color: var(--fg-mute); cursor: progress; }
 .last-collected { color: var(--fg-mute); font-variant-numeric: tabular-nums; }
 .collect-summary { color: var(--pass); font-weight: 600; }
 .collect-blocked, .collect-error { color: var(--pending); font-weight: 500; }
@@ -346,13 +371,13 @@ table.checklist-table tbody tr.result-info   { background: #fcfcff; }
   font-size: 12px;
   text-decoration: underline;
 }
-.key-link:hover { color: #1958b6; }
+.key-link:hover { color: var(--accent-hover); }
 
 .key-prompt {
   margin: -6px 0 10px;
   padding: 12px 14px;
   background: var(--pending-weak);
-  border: 1px solid #f0d794;
+  border: 1px solid var(--pending-border);
   border-radius: var(--radius);
   font-size: 13px;
 }
@@ -390,7 +415,7 @@ table.checklist-table tbody tr.result-info   { background: #fcfcff; }
   margin: 4px 0 10px;
   padding: 8px 12px;
   background: var(--reject-weak);
-  border: 1px solid #f0b2ab;
+  border: 1px solid var(--reject-border);
   border-radius: var(--radius);
   font-size: 12px;
 }
@@ -448,7 +473,7 @@ table.checklist-table tbody tr.result-info   { background: #fcfcff; }
   display: inline-block;
   width: 12px; height: 12px;
   border-radius: 3px;
-  border: 1px solid rgba(0, 0, 0, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   background: var(--chip-neutral-bg);
 }
 .legend-item.event-pass-s     .legend-swatch { background: var(--chip-pass-s-bg); }
@@ -480,7 +505,7 @@ table.checklist-table tbody tr.result-info   { background: #fcfcff; }
   font-size: 12px;
   color: var(--fg-mute);
   font-weight: 600;
-  background: #f1f4f9;
+  background: var(--surface);
 }
 .cal-wh.wh-sun { color: var(--reject); }
 .cal-wh.wh-sat { color: var(--accent); }
@@ -504,14 +529,14 @@ table.checklist-table tbody tr.result-info   { background: #fcfcff; }
   background: var(--panel);
 }
 .cal-cell:nth-child(7n) { border-right: 0; }
-.cal-cell.off-month { background: #fafbfc; color: var(--fg-mute); }
+.cal-cell.off-month { background: var(--surface-weak); color: var(--fg-mute); }
 .cal-cell.today { outline: 2px solid var(--accent); outline-offset: -2px; }
 .cal-cell.selected { background: var(--accent-weak); }
 .cal-cell.is-sun .cal-date { color: var(--reject); }
 .cal-cell.is-sat .cal-date { color: var(--accent); }
 /* v1.6 (#20): 셀 자체가 선택 트리거. 이벤트가 있으면 pointer, 없으면 default. */
 .cal-cell.has-events { cursor: pointer; }
-.cal-cell.has-events:hover:not(.selected) { background: #f1f4f9; }
+.cal-cell.has-events:hover:not(.selected) { background: var(--surface); }
 .cal-cell.has-events:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
@@ -570,7 +595,7 @@ table.checklist-table tbody tr.result-info   { background: #fcfcff; }
   margin: 16px 0 24px;
   padding: 14px 18px;
   background: var(--correction-weak);
-  border: 1px solid #f0b876;
+  border: 1px solid var(--correction-border);
   border-left: 4px solid var(--correction);
   border-radius: var(--radius);
 }
@@ -582,7 +607,7 @@ table.checklist-table tbody tr.result-info   { background: #fcfcff; }
   margin: 16px 0 24px;
   padding: 10px 14px;
   background: var(--pending-weak);
-  border: 1px solid #f0d794;
+  border: 1px solid var(--pending-border);
   border-left: 4px solid var(--pending);
   border-radius: var(--radius);
   color: var(--fg);
@@ -657,8 +682,8 @@ table.checklist-table tbody tr.result-info   { background: #fcfcff; }
 
 /* Scoring config ----------------------------------------------------------- */
 .json-dump {
-  background: #0e1623;
-  color: #c7d6ea;
+  background: var(--surface-weak);
+  color: var(--fg);
   border-radius: var(--radius);
   padding: 16px;
   overflow: auto;
@@ -668,7 +693,7 @@ table.checklist-table tbody tr.result-info   { background: #fcfcff; }
 
 /* Misc --------------------------------------------------------------------- */
 .loading, .empty { color: var(--fg-mute); }
-.error { color: var(--reject); background: var(--reject-weak); padding: 10px 12px; border-radius: var(--radius); border: 1px solid #f0b2ab; }
+.error { color: var(--reject); background: var(--reject-weak); padding: 10px 12px; border-radius: var(--radius); border: 1px solid var(--reject-border); }
 
 .disclaimer {
   margin: 0;
