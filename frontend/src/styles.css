@@ -51,7 +51,7 @@
   --chip-incomplete-bg: #6f42c1;  --chip-incomplete-fg: #ffffff;  /* v1.9 (#27): 보라 */
   --chip-reject-bg:     #a3251b;  --chip-reject-fg:     #ffffff;
   --chip-neutral-bg:    #5f6b7a;  --chip-neutral-fg:    #ffffff;
-  --chip-listing-bg:    #b45309;  --chip-listing-fg:    #ffffff;  /* v1.9 (#27): 주황 */
+  --chip-listing-bg:    #c9a227;  --chip-listing-fg:    #1a1400;  /* v1.10 (#28): 차분한 금색 + 진한 글자(대비 ~9:1) */
 
   --radius: 8px;
 }
@@ -583,8 +583,8 @@ table.checklist-table tbody tr.result-info   { background: var(--row-info); }
 .cal-chip.event-pending    { background: var(--chip-neutral-bg);    color: var(--chip-neutral-fg);    }
 .cal-chip.event-correction { background: var(--chip-neutral-bg);    color: var(--chip-neutral-fg);    }
 
-/* 연한 파랑(B) 만 어두운 글자 — chip-listing outline 보정 */
-.cal-chip.event-pass-b.chip-listing     { outline-color: rgba(10, 43, 87, 0.55); }
+/* v1.10 (#28): 상장 칩은 `.cal-chip.chip-listing { outline: none !important }` 로 outline 자체를 끄므로
+   outline-color 보정은 데드코드 — 삭제. */
 /* PENDING 은 "판정 완료 종목" 이 눈에 띄도록 흐린 톤.
    opacity 가 아닌 배경·글자색 대조로 처리해 텍스트 가독성은 유지. */
 /* v1.6: 이전 흐린 톤 PENDING / 보라 INCOMPLETE / 주황 CORRECTION 선언은 위 규칙으로 교체됨 */

@@ -43,7 +43,7 @@ Vite 가 `/api` 요청을 `http://localhost:8000` (backend FastAPI) 로 프록�
   - INCOMPLETE — 보라 `#6f42c1`
   - REJECT — 빨강 `#a3251b`
   - PENDING·CORRECTION — 짙은 회색 `#5f6b7a` + 흰 글자
-  - 상장 — 주황 `#b45309`
+  - 상장 — 차분한 금색 `#c9a227` + 진한 글자 `#1a1400` (대비 ~9:1, 다크 바탕에서 눈부시지 않게)
 - **셀 내 정렬 우선순위**: S > A > B > INCOMPLETE > REJECT > PENDING > CORRECTION. 같은 등급 안에서는 입력 순(안정 정렬).
 - **CORRECTION 숨김**: 셀에 non-correction 이벤트가 하나라도 있으면 CORRECTION 칩은 셀에서 숨기고 "+N 더보기" 에만 포함. 셀에 CORRECTION 만 있으면 그대로 노출.
 - **클릭**: 칩은 non-interactive(span). 날짜 셀 어디를 눌러도 하단 **선택 날짜 패널**이 열림. 패널의 종목 항목만 상세 페이지로 이동. 키보드 Tab/Enter·Space 로 셀 포커스 선택 가능.
