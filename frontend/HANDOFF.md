@@ -198,6 +198,8 @@ ls dist/
 ### 4-6. iOS
 
 - **입력 자동 확대 방지**: `@media (pointer: coarse), (max-width: 768px) { input, select, textarea { font-size: 16px } }`.
+  - **(#38)** 이 블록은 `styles.css` **파일 끝** 에 두어야 한다. 파일 앞에 두면 뒤에 오는 class+attribute 규칙(e.g. `.holding-form input[type="text"] { font-size: 13px }`, specificity 0,2,1) 에 덮어씌워진다. 또한 **동등 이상 specificity 로 명시** — `.key-prompt input`·`.my-add-panel input[type="text"]`·`.holding-form input[type="text"]`·`.holding-form .holding-memo input[type="text"]` 전부 override 리스트에 포함.
+  - 재발 방지: CSS 변경 뒤에는 반드시 **빌드 산출 CSS 안에서 override 가 원본 뒤에 있는지** `grep -boF` 로 오프셋 비교하고, 가능하면 DevTools 모바일 에뮬레이션에서 `getComputedStyle(el).fontSize` 로 확인.
 - **viewport 에 `maximum-scale=1`·`user-scalable=no` 금지**(접근성). 핀치 줌은 허용.
 - **포커스 시 중앙 스크롤**: `scrollIntoViewOnMobile` (매치미디어 try/catch 보호).
 - **apple-touch-icon·apple-mobile-web-app-capable=yes·status-bar black-translucent**: `index.html`.
