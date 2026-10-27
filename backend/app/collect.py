@@ -80,8 +80,7 @@ DART_URL = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo="
 #   v30 — 지시 #45 ②-1 (본문 추출 확대: tradable·offering counts·offering amount·final_price. lockup 는 HTML 구조 유지로 미적용)
 #   v31 — 지시 #48 (extract_offering_amount_krw 본문 추출 회귀 원복 — 1주 가격 오매치 사고 해소)
 #   v32 — 지시 #49 (수요예측 라벨 각주 "(주N)" 수용 — 래블업 / 유통 부분값 힌트 확장 — 영광)
-#   v33 — 지시 #51(f96349b9)+#52(bc5b9566) (증분 조회 전 유형 확장 — 신규 ISSUANCE_REPORT 포함, 이에스티 listing_date 보강 트리거)
-PARSER_VERSION = "v33"
+PARSER_VERSION = "v32"
 
 
 # ---------- 분류 ----------
