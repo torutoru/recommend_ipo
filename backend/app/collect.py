@@ -81,7 +81,8 @@ DART_URL = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo="
 #   v31 — 지시 #48 (extract_offering_amount_krw 본문 추출 회귀 원복 — 1주 가격 오매치 사고 해소)
 #   v32 — 지시 #49 (수요예측 라벨 각주 "(주N)" 수용 — 래블업 / 유통 부분값 힌트 확장 — 영광)
 #   v34 — 지시 #53 (증분 조회 2단계 — C001 신규 발견 + 전 유형은 existing corp 만 수용. v33 비IPO 유입 회귀 해소)
-PARSER_VERSION = "v34"
+#   v35 — 지시 #55 ([첨부정정] 공시 core 후보 제외 — document.xml 014 해소, 제논 재처리)
+PARSER_VERSION = "v35"
 
 
 # ---------- 분류 ----------
@@ -218,11 +219,22 @@ def group_by_corp(items: list[dict]) -> dict[str, list[dict]]:
     return out
 
 
+_RE_ATTACHMENT_ONLY = re.compile(r"\[첨부정정\]")
+
+
+def _is_attachment_only(d: dict) -> bool:
+    """지시 #55: `[첨부정정]` 공시 — 첨부서류만 정정한 공시로 document.xml 응답 014(파일 없음).
+    core 후보에서 제외하되 sources 메타는 유지.
+    """
+    return bool(_RE_ATTACHMENT_ONLY.search(d.get("report_nm", "")))
+
+
 def choose_core_disclosure(disclosures: list[dict]) -> tuple[Optional[dict], list[dict]]:
     """
     (정본 공시, 모든 유효 공시(sources 용)).
     정본 우선순위: [발행조건확정] > 가장 최근 [기재정정]/[정정제출요구] 증권신고서 > 최초 증권신고서.
     철회신고서 있으면 (None, [])  — 호출자가 전체 종목을 스킵하도록.
+    지시 #55: `[첨부정정]` 공시는 본문 원문이 없어(status=014) core 후보에서 제외.
     """
     classified = []
     for d in disclosures:
@@ -237,15 +249,19 @@ def choose_core_disclosure(disclosures: list[dict]) -> tuple[Optional[dict], lis
     def _is_company_doc(d: dict) -> bool:
         return not _is_fss_notice_rcept_no(d.get("rcept_no", ""))
 
-    # 발행조건확정 우선 (가장 최근) — 금감원 공지는 제외
+    # 발행조건확정 우선 (가장 최근) — 금감원 공지·첨부정정 제외
     finals = [c for c in classified
-              if is_final_release(c[0].get("report_nm", "")) and _is_company_doc(c[0])]
+              if is_final_release(c[0].get("report_nm", ""))
+              and _is_company_doc(c[0])
+              and not _is_attachment_only(c[0])]
     if finals:
         core = max(finals, key=lambda c: c[0].get("rcept_dt", ""))[0]
     else:
-        # 모든 지분증권 증권신고서(기재정정/정정제출요구/신규) 중 최신 — 금감원 공지는 제외
+        # 모든 지분증권 증권신고서(기재정정/정정제출요구/신규) 중 최신 — 금감원 공지·첨부정정 제외
         regs = [c for c in classified
-                if c[1] == "REGISTRATION_AMENDED" and _is_company_doc(c[0])]
+                if c[1] == "REGISTRATION_AMENDED"
+                and _is_company_doc(c[0])
+                and not _is_attachment_only(c[0])]
         if regs:
             core = max(regs, key=lambda c: c[0].get("rcept_dt", ""))[0]
         else:
