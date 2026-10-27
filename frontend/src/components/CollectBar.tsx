@@ -4,6 +4,7 @@ import type { CollectStatus } from '../types'
 import { fmtDateTime } from '../utils/format'
 import { HttpError } from '../utils/httpError'
 import { clearCollectKey, loadCollectKey, saveCollectKey } from '../utils/collectKey'
+import { scrollIntoViewOnMobile } from '../utils/focus'
 
 interface Props {
   onSucceeded: () => void
@@ -189,6 +190,7 @@ export function CollectBar({ onSucceeded }: Props) {
               onChange={e => setKeyInput(e.target.value)}
               placeholder="X-Collect-Key"
               autoFocus
+              onFocus={scrollIntoViewOnMobile}
             />
           </label>
           <div className="key-prompt-actions">

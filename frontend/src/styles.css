@@ -58,6 +58,23 @@
 
 * { box-sizing: border-box; }
 
+/* v1.11 (#33): 모바일에서 입력칸 글자 크기 ≥16px — iOS Safari 자동 확대 방지.
+   `(pointer: coarse)` 로 터치 디바이스를 1차 타깃팅하고, 뷰포트 폭도 폴백으로 묶음.
+   viewport 에 maximum-scale=1·user-scalable=no 는 **쓰지 않는다**(접근성). */
+@media (pointer: coarse), (max-width: 768px) {
+  input[type="text"],
+  input[type="password"],
+  input[type="search"],
+  input[type="number"],
+  input[type="email"],
+  input[type="tel"],
+  input[type="url"],
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
 html, body, #root { height: 100%; }
 
 body {

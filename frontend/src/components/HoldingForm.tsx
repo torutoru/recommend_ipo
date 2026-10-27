@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { holdings, type Holding } from '../api/holdings'
 import { fmtKrw } from '../utils/format'
+import { scrollIntoViewOnMobile } from '../utils/focus'
 
 interface Props {
   corpCode: string
@@ -69,13 +70,13 @@ export function HoldingForm({ corpCode, defaultPrice, onSaved, onCancel, onDelet
         <span>배정 수량 (주)</span>
         <input type="text" inputMode="numeric" pattern="[0-9]*" value={sharesStr}
           onChange={e => setSharesStr(e.target.value)} placeholder="예: 10" required autoFocus
-          disabled={busy} />
+          onFocus={scrollIntoViewOnMobile} disabled={busy} />
       </label>
       <label>
         <span>공모가 (원)</span>
         <input type="text" inputMode="numeric" pattern="[0-9]*" value={priceStr}
           onChange={e => setPriceStr(e.target.value)} placeholder="확정 공모가" required
-          disabled={busy} />
+          onFocus={scrollIntoViewOnMobile} disabled={busy} />
       </label>
       <div className="holding-total">
         투자금액: <strong>{total !== null ? fmtKrw(total) : '—'}</strong>
@@ -84,7 +85,7 @@ export function HoldingForm({ corpCode, defaultPrice, onSaved, onCancel, onDelet
         <span>메모 (선택, 최대 60자)</span>
         <input type="text" maxLength={60} value={memo}
           onChange={e => setMemo(e.target.value)} placeholder="예: 균등 10주, 비례 미참여"
-          disabled={busy} />
+          onFocus={scrollIntoViewOnMobile} disabled={busy} />
       </label>
       {err && <p className="holding-err" role="alert">{err}</p>}
       <div className="holding-actions">

@@ -7,6 +7,7 @@ import { parseYmd, toYmd } from '../utils/calendar'
 import { fmtDate, fmtKrw, NULL_PLACEHOLDER } from '../utils/format'
 import { Loading } from '../components/Loading'
 import { HoldingForm } from '../components/HoldingForm'
+import { scrollIntoViewOnMobile } from '../utils/focus'
 
 type Bucket = 'today' | 'future' | 'undated' | 'past'
 
@@ -159,7 +160,8 @@ export function MyPage() {
         <div className="my-add-panel">
           <h3>종목 추가</h3>
           <input type="text" value={searchQ} onChange={e => setSearchQ(e.target.value)}
-            placeholder="회사명 검색" aria-label="회사명 검색" />
+            placeholder="회사명 검색" aria-label="회사명 검색"
+            onFocus={scrollIntoViewOnMobile} />
           <ul className="my-add-list">
             {addable.map(x => (
               <li key={x.id}>
