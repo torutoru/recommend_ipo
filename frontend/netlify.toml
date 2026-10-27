@@ -35,3 +35,24 @@
   from = "/*"
   to = "/index.html"
   status = 200
+
+# ───────────────────────────────────────────────────────────────────────────────
+# v1.11 (#32): PWA 캐시 헤더
+#   - sw.js, workbox-*.js: 매 요청마다 네트워크 확인 (업데이트 즉시 반영).
+#   - manifest.webmanifest: 자주 바뀌지는 않지만 캐시 수명 짧게.
+# ───────────────────────────────────────────────────────────────────────────────
+
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+[[headers]]
+  for = "/workbox-*.js"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+[[headers]]
+  for = "/manifest.webmanifest"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"

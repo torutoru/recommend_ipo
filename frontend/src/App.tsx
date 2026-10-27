@@ -9,6 +9,8 @@ import { ScoringConfigPage } from './pages/ScoringConfigPage'
 import { GuidePage } from './pages/GuidePage'
 import { Disclaimer } from './components/Disclaimer'
 import { ListingBanner } from './components/ListingBanner'
+import { OfflineBanner } from './components/OfflineBanner'
+import { UpdateBanner } from './components/UpdateBanner'
 import { USE_MOCK } from './config'
 import { subscribeSlow } from './utils/wakeWatcher'
 
@@ -45,6 +47,8 @@ export default function App() {
           </div>
         )}
       </header>
+      <UpdateBanner />
+      <OfflineBanner />
       <ListingBanner />
       <main className="site-main">
         <Routes>
