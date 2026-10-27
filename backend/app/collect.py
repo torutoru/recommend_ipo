@@ -82,7 +82,8 @@ DART_URL = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo="
 #   v32 — 지시 #49 (수요예측 라벨 각주 "(주N)" 수용 — 래블업 / 유통 부분값 힌트 확장 — 영광)
 #   v34 — 지시 #53 (증분 조회 2단계 — C001 신규 발견 + 전 유형은 existing corp 만 수용. v33 비IPO 유입 회귀 해소)
 #   v35 — 지시 #55 ([첨부정정] 공시 core 후보 제외 — document.xml 014 해소, 제논 재처리)
-PARSER_VERSION = "v35"
+#   v36 — 지시 #56 (sources.report_nm 추가 + IpoDetail.data_notes + 014 사유 문구)
+PARSER_VERSION = "v36"
 
 
 # ---------- 분류 ----------
@@ -290,6 +291,7 @@ def process_corp(
             "rcept_no": s["disclosure"]["rcept_no"],
             "rcept_dt": _dash_date(s["disclosure"]["rcept_dt"]),
             "url": DART_URL + s["disclosure"]["rcept_no"],
+            "report_nm": s["disclosure"].get("report_nm"),   # 지시 #56
         }
         for s in raw_sources
     ]

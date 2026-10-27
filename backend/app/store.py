@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS sources (
     rcept_no   TEXT NOT NULL,
     rcept_dt   TEXT NOT NULL,
     url        TEXT NOT NULL,
+    report_nm  TEXT,                        -- 지시 #56: data_notes 생성용 ([첨부정정] 식별)
     PRIMARY KEY (corp_code, rcept_no),
     FOREIGN KEY (corp_code) REFERENCES ipos(corp_code) ON DELETE CASCADE
 );
@@ -141,6 +142,8 @@ _MIGRATIONS: list[tuple[str, str, str]] = [
     ("ipos", "correction_amended_at", "correction_amended_at TEXT"),
     # 지시 #21 / v1.2: 주관사·인수회사(JSON 문자열, list[str])
     ("ipos", "underwriters_json", "underwriters_json TEXT"),
+    # 지시 #56 / v1.8: `IpoDetail.data_notes` 생성에 report_nm 이 필요([첨부정정] 식별).
+    ("sources", "report_nm", "report_nm TEXT"),
 ]
 
 
@@ -262,9 +265,11 @@ def replace_sources(
 ) -> None:
     conn.execute("DELETE FROM sources WHERE corp_code = ?", (corp_code,))
     conn.executemany(
-        "INSERT INTO sources (corp_code, doc_type, rcept_no, rcept_dt, url) VALUES (?,?,?,?,?)",
+        "INSERT INTO sources (corp_code, doc_type, rcept_no, rcept_dt, url, report_nm) "
+        "VALUES (?,?,?,?,?,?)",
         [
-            (corp_code, s["doc_type"], s["rcept_no"], s["rcept_dt"], s["url"])
+            (corp_code, s["doc_type"], s["rcept_no"], s["rcept_dt"], s["url"],
+             s.get("report_nm"))
             for s in sources
         ],
     )
@@ -391,6 +396,7 @@ def list_ipos(path: Optional[Path] = None) -> list[dict]:
                 "rcept_no": r["rcept_no"],
                 "rcept_dt": r["rcept_dt"],
                 "url": r["url"],
+                "report_nm": r["report_nm"] if "report_nm" in r.keys() else None,
             })
         warns: dict[str, list[str]] = {}
         for r in conn.execute("SELECT * FROM parse_warnings ORDER BY seq"):
@@ -413,7 +419,8 @@ def get_ipo(corp_code: str, path: Optional[Path] = None) -> Optional[dict]:
         out = _row_to_dict(row)
         out["sources"] = [
             {"doc_type": r["doc_type"], "rcept_no": r["rcept_no"],
-             "rcept_dt": r["rcept_dt"], "url": r["url"]}
+             "rcept_dt": r["rcept_dt"], "url": r["url"],
+             "report_nm": r["report_nm"] if "report_nm" in r.keys() else None}
             for r in conn.execute(
                 "SELECT * FROM sources WHERE corp_code = ? ORDER BY rcept_dt", (corp_code,)
             )

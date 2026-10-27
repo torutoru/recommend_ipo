@@ -143,6 +143,9 @@ class IpoDetail(IpoSummary):
     checklist: list[ChecklistItem] = Field(default_factory=list)   # v1.5 — 판정 4항목
     # v1.2 (지시 #21): 주관사·인수회사 이름(대표→공동→인수 순, 중복 제거). 상세 화면에만 노출.
     underwriters: list[str] = Field(default_factory=list)
+    # v1.8 (지시 #56, requirements 27장): 그 종목에 적용된 알려진 처리 상황을 사용자용 문장으로.
+    # 상세 API 에만. 없으면 []. 비밀값·경로 없음. 예(제논): "10/26 [첨부정정] ..."
+    data_notes: list[str] = Field(default_factory=list)
 
 
 class IpoList(BaseModel):

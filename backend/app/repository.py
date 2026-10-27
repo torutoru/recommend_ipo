@@ -71,6 +71,57 @@ def _underwriters_from_row(row: dict) -> list[str]:
         return []
 
 
+def _data_notes_from_row(row: dict) -> list[str]:
+    """지시 #56 (api-contract v1.8, requirements 27장): 상세 응답 전용 사용자 안내 문구.
+
+    현재 커버 사례:
+    - **[첨부정정] 공시**: core_rcept(report_rcept_no) 보다 **더 최근** 의 `[첨부정정]` 공시가
+      sources 에 있으면 "N년 N월 N일 [첨부정정] 증권신고서는 본문 원문이 없어 **core 공시 날짜** [기재정정] 공시 기준으로 표시합니다."
+    - **preserved**: ipos.report_rcept_no 는 있지만 지표가 전부 null 이면 "정본 공시 없음 — 기존 지표 보존" 안내는 현재 미구현(preserved 상태를 응답 레벨에서 판정 어려움). 다음 라운드에 추가.
+    """
+    notes: list[str] = []
+    sources = row.get("sources") or []
+    core_rcept = row.get("report_rcept_no")
+    if not sources or not core_rcept:
+        return notes
+
+    # core 공시의 rcept_dt 찾기
+    core_rcept_dt: Optional[str] = None
+    for s in sources:
+        if s.get("rcept_no") == core_rcept:
+            core_rcept_dt = s.get("rcept_dt")
+            break
+
+    # [첨부정정] 중 core 보다 더 최근 공시 수집
+    for s in sources:
+        report_nm = s.get("report_nm") or ""
+        rcept_dt = s.get("rcept_dt") or ""
+        if "[첨부정정]" not in report_nm:
+            continue
+        if core_rcept_dt and rcept_dt > core_rcept_dt:
+            # 사용자용 문구 — 날짜만 노출, 비밀값·경로 없음
+            notes.append(
+                f"{_format_date_korean(rcept_dt)} [첨부정정] 증권신고서는 본문 원문이 없어 "
+                f"{_format_date_korean(core_rcept_dt)} 공시 기준으로 표시합니다."
+            )
+            break   # 중복 방지 — 한 종목에 1건만
+
+    return notes
+
+
+def _format_date_korean(ymd: Optional[str]) -> str:
+    """`YYYY-MM-DD` → `MM/DD` (연도 생략, 사용자 친화)."""
+    if not ymd:
+        return ""
+    try:
+        parts = ymd.split("-")
+        if len(parts) == 3:
+            return f"{int(parts[1])}/{int(parts[2])}"
+    except Exception:
+        pass
+    return ymd
+
+
 def _detail_from_row(row: dict) -> IpoDetail:
     cfg = get_scoring_config()
     ind = _indicators_from_row(row)
@@ -101,6 +152,7 @@ def _detail_from_row(row: dict) -> IpoDetail:
         sources=_sources_from_row(row),
         checklist=checklist,
         underwriters=_underwriters_from_row(row),   # v1.2 (지시 #21)
+        data_notes=_data_notes_from_row(row),       # v1.8 (지시 #56)
     )
 
 

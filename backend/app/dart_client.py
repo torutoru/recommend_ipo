@@ -141,7 +141,15 @@ def download_document_zip(
             if data.startswith(_ZIP_MAGIC):
                 return data
             # ZIP 아님 — status 014 등 JSON/XML 응답. 재시도.
-            last_err = f"응답이 ZIP 아님(attempt {attempt}, 크기 {len(data)}B)"
+            # 지시 #56: 014 "파일이 존재하지 않습니다" 는 원문 자체가 없는 상황 — 원인이 드러나는 문구.
+            _file_missing = "파일이 존재하지 않습니다".encode("utf-8")
+            is_014 = b"<status>014</status>" in data or (
+                b"014" in data[:200] and _file_missing in data
+            )
+            if is_014:
+                last_err = f"DART 014 파일 없음(attempt {attempt})"
+            else:
+                last_err = f"응답이 ZIP 아님(attempt {attempt}, 크기 {len(data)}B)"
         except (httpx.HTTPError, RuntimeError) as e:
             # RuntimeError 는 _raise_sanitized 가 던지는 URL 없는 예외
             last_err = f"HTTP {type(e).__name__}(attempt {attempt})"

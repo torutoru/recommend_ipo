@@ -46,6 +46,11 @@
 - `correction_requested_at`, `correction_amended_at` 도 excluded 로 교체 (지시 #32)
 - `final_price` 는 **competition_rate 가 새·기존 모두 null 이면** excluded 값으로 교체 (지시 #43 — 가정문 오파싱 보존 방지)
 
+## 수집 실패 정의 (지시 #56, requirements 27장)
+- `failures` / `failed_count` 에는 **예상하지 못한 오류만** 집계 (timeout·5xx 반복, 본문이 있어야 할 공시가 ZIP 아님, 파싱 예외, DB 오류)
+- 알려진 처리 상황은 실패가 아니다 (**본문 없는 공시 skip**, preserved 지표 보존, 비IPO·FSS 공지 제외)
+- 014 가 다른 유형에서 나면 **"DART 014 파일 없음"** 처럼 **원인이 드러나는 문구**로 표기 (dart_client 가 자동 식별)
+
 ## 샘플 데이터 요구
 - `use_sample_data=True` 시 `/api/ipos` 응답에 PENDING / PASS / REJECT 가 **각각 1건 이상**
 - frontend 가 즉시 UI 를 붙일 수 있어야 한다
