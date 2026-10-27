@@ -74,26 +74,44 @@ export function MyPage() {
 
   const rows: Row[] = useMemo(() => {
     const byCode = new Map((ipos ?? []).map(x => [x.id, x]))
-    return list
-      .map(h => {
-        const ipo = byCode.get(h.corp_code) ?? null
-        const { bucket, days } = classify(ipo, todayYmd)
-        return { holding: h, ipo, bucket, daysUntil: days }
-      })
-      .sort((a, b) => {
-        const oa = BUCKET_ORDER.indexOf(a.bucket)
-        const ob = BUCKET_ORDER.indexOf(b.bucket)
-        if (oa !== ob) return oa - ob
-        if (a.bucket === 'future' && b.bucket === 'future') {
-          return (a.daysUntil ?? 0) - (b.daysUntil ?? 0)
-        }
-        const an = a.ipo?.corp_name ?? a.holding.corp_code
-        const bn = b.ipo?.corp_name ?? b.holding.corp_code
-        return an.localeCompare(bn, 'ko')
-      })
+    return list.map(h => {
+      const ipo = byCode.get(h.corp_code) ?? null
+      const { bucket, days } = classify(ipo, todayYmd)
+      return { holding: h, ipo, bucket, daysUntil: days }
+    })
   }, [list, ipos, todayYmd])
 
-  const totalInvestment = rows.reduce((s, r) => s + r.holding.shares * r.holding.price, 0)
+  // v1.11 (#39): 「상장 예정」 — today → D-N 가까운 순 → 미정, 같은 버킷은 회사명 가나다.
+  const upcomingRows = useMemo(() => {
+    return rows.filter(r => r.bucket !== 'past').sort((a, b) => {
+      const oa = BUCKET_ORDER.indexOf(a.bucket)
+      const ob = BUCKET_ORDER.indexOf(b.bucket)
+      if (oa !== ob) return oa - ob
+      if (a.bucket === 'future' && b.bucket === 'future') {
+        return (a.daysUntil ?? 0) - (b.daysUntil ?? 0)
+      }
+      const an = a.ipo?.corp_name ?? a.holding.corp_code
+      const bn = b.ipo?.corp_name ?? b.holding.corp_code
+      return an.localeCompare(bn, 'ko')
+    })
+  }, [rows])
+
+  // v1.11 (#39): 「상장 완료」 — 최근 상장 순(listing_date 내림차순), 동률은 회사명.
+  const completedRows = useMemo(() => {
+    return rows.filter(r => r.bucket === 'past').sort((a, b) => {
+      const ad = a.ipo?.listing_date ?? ''
+      const bd = b.ipo?.listing_date ?? ''
+      if (ad !== bd) return bd.localeCompare(ad)
+      const an = a.ipo?.corp_name ?? a.holding.corp_code
+      const bn = b.ipo?.corp_name ?? b.holding.corp_code
+      return an.localeCompare(bn, 'ko')
+    })
+  }, [rows])
+
+  const sumInvestment = (rs: Row[]) => rs.reduce((s, r) => s + r.holding.shares * r.holding.price, 0)
+  const upcomingTotal = sumInvestment(upcomingRows)
+  const completedTotal = sumInvestment(completedRows)
+  const totalInvestment = upcomingTotal + completedTotal
 
   const addable = useMemo(() => {
     if (!ipos) return []
@@ -195,83 +213,114 @@ export function MyPage() {
           <button type="button" className="my-add-btn" onClick={() => setAdding(true)}>+ 추가</button>
         </div>
       ) : rows.length > 0 ? (
-        <div className="my-table-wrap">
-          <table className="my-table">
-            <thead>
-              <tr>
-                <th>종목</th>
-                <th>상장일</th>
-                <th className="num">수량</th>
-                <th className="num">공모가</th>
-                <th className="num">투자금액</th>
-                <th>상태</th>
-                <th>관리</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map(r => {
-                const isEditing = editingCorp === r.holding.corp_code
-                return (
-                  <Fragment key={r.holding.corp_code}>
-                    <tr>
-                      <td>
-                        {r.ipo ? (
-                          <Link to={`/ipos/${r.holding.corp_code}`}>{r.ipo.corp_name}</Link>
-                        ) : (
-                          <code>{r.holding.corp_code}</code>
-                        )}
-                      </td>
-                      <td>{r.ipo?.listing_date ? fmtDate(r.ipo.listing_date) : NULL_PLACEHOLDER}</td>
-                      <td className="num">{r.holding.shares.toLocaleString('ko-KR')}주</td>
-                      <td className="num">{fmtKrw(r.holding.price)}</td>
-                      <td className="num"><strong>{fmtKrw(r.holding.shares * r.holding.price)}</strong></td>
-                      <td><StatusCell row={r} /></td>
-                      <td className="my-actions">
-                        <button type="button"
-                          onClick={() => setEditingCorp(c => c === r.holding.corp_code ? null : r.holding.corp_code)}>
-                          {isEditing ? '닫기' : '수정'}
-                        </button>
-                        <button type="button" className="holding-danger"
-                          onClick={() => {
-                            const name = r.ipo?.corp_name ?? r.holding.corp_code
-                            void onRemove(r.holding.corp_code, name)
-                          }}>
-                          삭제
-                        </button>
-                      </td>
-                    </tr>
-                    {r.holding.memo && !isEditing && (
-                      <tr className="my-memo-row">
-                        <td colSpan={7}>메모: <em>{r.holding.memo}</em></td>
-                      </tr>
-                    )}
-                    {isEditing && (
-                      <tr className="my-edit-row">
-                        <td colSpan={7}>
-                          <HoldingForm
-                            corpCode={r.holding.corp_code}
-                            defaultPrice={r.ipo?.final_price ?? null}
-                            onSaved={() => setEditingCorp(null)}
-                            onCancel={() => setEditingCorp(null)}
-                            onDeleted={() => setEditingCorp(null)}
-                          />
-                        </td>
-                      </tr>
-                    )}
-                  </Fragment>
-                )
-              })}
-            </tbody>
-            <tfoot>
-              <tr>
-                <td colSpan={4}>합계 투자금액</td>
-                <td className="num"><strong>{fmtKrw(totalInvestment)}</strong></td>
-                <td colSpan={2}></td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
+        <>
+          {/* v1.11 (#39): 「상장 예정」 구역 */}
+          <section className="my-section">
+            <h3 className="my-section-head">
+              <span>상장 예정</span>
+              <span className="my-section-count">{upcomingRows.length}건</span>
+              <span className="my-section-total">
+                투자금액 합계 <strong>{fmtKrw(upcomingTotal)}</strong>
+              </span>
+            </h3>
+            {upcomingRows.length === 0 ? (
+              <p className="my-section-empty">상장 예정인 공모주가 없습니다.</p>
+            ) : renderTable(upcomingRows)}
+          </section>
+
+          {/* v1.11 (#39): 「상장 완료」 구역 — 기본 펼침 */}
+          <section className="my-section">
+            <h3 className="my-section-head">
+              <span>상장 완료</span>
+              <span className="my-section-count">{completedRows.length}건</span>
+              <span className="my-section-total">
+                투자금액 합계 <strong>{fmtKrw(completedTotal)}</strong>
+              </span>
+            </h3>
+            {completedRows.length === 0 ? (
+              <p className="my-section-empty">상장 완료된 공모주가 없습니다.</p>
+            ) : renderTable(completedRows)}
+          </section>
+
+          <p className="my-total-line">
+            전체 합계 투자금액: <strong>{fmtKrw(totalInvestment)}</strong>
+          </p>
+        </>
       ) : null}
     </section>
   )
+
+  function renderTable(rs: Row[]) {
+    return (
+      <div className="my-table-wrap">
+        <table className="my-table">
+          <thead>
+            <tr>
+              <th>종목</th>
+              <th>상장일</th>
+              <th className="num">수량</th>
+              <th className="num">공모가</th>
+              <th className="num">투자금액</th>
+              <th>상태</th>
+              <th>관리</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rs.map(r => {
+              const isEditing = editingCorp === r.holding.corp_code
+              return (
+                <Fragment key={r.holding.corp_code}>
+                  <tr>
+                    <td>
+                      {r.ipo ? (
+                        <Link to={`/ipos/${r.holding.corp_code}`}>{r.ipo.corp_name}</Link>
+                      ) : (
+                        <code>{r.holding.corp_code}</code>
+                      )}
+                    </td>
+                    <td>{r.ipo?.listing_date ? fmtDate(r.ipo.listing_date) : NULL_PLACEHOLDER}</td>
+                    <td className="num">{r.holding.shares.toLocaleString('ko-KR')}주</td>
+                    <td className="num">{fmtKrw(r.holding.price)}</td>
+                    <td className="num"><strong>{fmtKrw(r.holding.shares * r.holding.price)}</strong></td>
+                    <td><StatusCell row={r} /></td>
+                    <td className="my-actions">
+                      <button type="button"
+                        onClick={() => setEditingCorp(c => c === r.holding.corp_code ? null : r.holding.corp_code)}>
+                        {isEditing ? '닫기' : '수정'}
+                      </button>
+                      <button type="button" className="holding-danger"
+                        onClick={() => {
+                          const name = r.ipo?.corp_name ?? r.holding.corp_code
+                          void onRemove(r.holding.corp_code, name)
+                        }}>
+                        삭제
+                      </button>
+                    </td>
+                  </tr>
+                  {r.holding.memo && !isEditing && (
+                    <tr className="my-memo-row">
+                      <td colSpan={7}>메모: <em>{r.holding.memo}</em></td>
+                    </tr>
+                  )}
+                  {isEditing && (
+                    <tr className="my-edit-row">
+                      <td colSpan={7}>
+                        <HoldingForm
+                          corpCode={r.holding.corp_code}
+                          defaultPrice={r.ipo?.final_price ?? null}
+                          onSaved={() => setEditingCorp(null)}
+                          onCancel={() => setEditingCorp(null)}
+                          onDeleted={() => setEditingCorp(null)}
+                        />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    )
+  }
 }

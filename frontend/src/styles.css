@@ -917,6 +917,48 @@ table.checklist-table tbody tr.result-info   { background: var(--row-info); }
 .my-empty .muted { color: var(--fg-mute); font-size: 12px; }
 .my-empty .my-add-btn { margin-top: 14px; }
 
+/* v1.11 (#39): /my 두 구역(상장 예정 / 상장 완료) 헤더 */
+.my-section { margin-top: 20px; }
+.my-section:first-of-type { margin-top: 8px; }
+.my-section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 0 0 10px;
+  font-size: 15px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.my-section-count { color: var(--fg-mute); font-size: 12px; font-weight: 400; }
+.my-section-total {
+  margin-left: auto;
+  color: var(--fg-mute);
+  font-size: 12px;
+  font-weight: 400;
+}
+.my-section-total strong { color: var(--fg); font-weight: 600; }
+.my-section-empty {
+  padding: 20px;
+  color: var(--fg-mute);
+  text-align: center;
+  background: var(--panel);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  font-size: 13px;
+}
+.my-total-line {
+  margin: 16px 0 0;
+  padding: 10px 14px;
+  text-align: right;
+  background: var(--surface-weak);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--fg);
+  font-size: 14px;
+}
+.my-total-line strong { color: var(--accent); font-weight: 700; }
+
 .my-table-wrap {
   overflow-x: auto;
   background: var(--panel);
