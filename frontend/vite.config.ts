@@ -6,8 +6,20 @@ import { VitePWA } from 'vite-plugin-pwa'
 //   - 앱 셸(정적 자산) 프리캐시, SPA fallback 은 index.html.
 //   - /api/* 는 NetworkFirst(실패 시 마지막 응답). 단, holdings PUT/DELETE 는 전혀 캐시하지 않음.
 //   - skipWaiting 사용 안 함(강제 새로고침 금지). 새 버전은 UpdateBanner 가 안내.
+//
+// v1.11 (#34): 빌드 버전 주입.
+//   - COMMIT_REF 환경변수(Netlify 가 자동 설정) 를 짧은 해시로.
+//   - 빌드 시각은 ISO 로 define 에 주입. 앱 하단 고지 옆에 작게 노출.
+
+const COMMIT_REF = process.env.COMMIT_REF ?? ''
+const SHORT_COMMIT = COMMIT_REF ? COMMIT_REF.slice(0, 7) : ''
+const BUILD_TIME = new Date().toISOString()
 
 export default defineConfig({
+  define: {
+    __BUILD_COMMIT__: JSON.stringify(SHORT_COMMIT),
+    __BUILD_TIME__: JSON.stringify(BUILD_TIME),
+  },
   plugins: [
     react(),
     VitePWA({

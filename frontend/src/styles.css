@@ -721,6 +721,19 @@ table.checklist-table tbody tr.result-info   { background: var(--row-info); }
   margin-left: auto;
   margin-right: auto;
 }
+/* v1.11 (#34): 빌드 메타 — 짧은 커밋/빌드 시각 노출 (고지 끝). */
+.build-tag {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 1px 6px;
+  background: var(--surface-weak);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--fg-mute);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  white-space: nowrap;
+}
 
 /* v1.10 (#29): 「내 공모주」 ------------------------------------------------- */
 
