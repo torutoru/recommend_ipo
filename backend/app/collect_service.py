@@ -171,7 +171,10 @@ def _run_safely() -> None:
 def _run() -> None:
     store.init_db()
     bgn, end = _date_range()
-    disclosures = _fetch_list(bgn, end)
+    # 지시 #52/#51: 증분 조회를 C001(지분증권) 로 좁히면 신규 증권발행실적보고서(상장일 보강 소스)가
+    # grouped 에 들어오지 않아 unchanged 처리 → listing_date 영구 null 문제. 전체 유형으로 조회해
+    # ISSUANCE_REPORT 를 포함시킨다. 노이즈는 group_by_corp + classify_report 가 걸러낸다.
+    disclosures = _fetch_list(bgn, end, pblntf_detail_ty=None)
 
     # 기존 접수번호 집합 — 신규 판별
     # parser_version 이 현재 코드 버전과 다른 종목은 "변화 없음" 분기에서 빼내 재파싱 (지시 #16)
