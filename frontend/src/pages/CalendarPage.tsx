@@ -308,8 +308,9 @@ function EventChip({ ev, isHeld }: { ev: CalEvent; isHeld: boolean }) {
     : `cal-chip ${VERDICT_CLS[key]}`
   return (
     <span className={cls} title={title} aria-label={title}>
+      {/* v1.8 (#37): 청약 칩에도 "(청약)" 접두. 상장 칩은 기존 "(상장)" / "★ (상장)" 유지. */}
       <span className="chip-name">
-        {isListing ? `${star ? '★ ' : ''}(상장) ${ev.item.corp_name}` : ev.item.corp_name}
+        {isListing ? `${star ? '★ ' : ''}(상장) ${ev.item.corp_name}` : `(청약) ${ev.item.corp_name}`}
       </span>
     </span>
   )
