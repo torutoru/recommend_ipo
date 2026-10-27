@@ -697,6 +697,27 @@ table.checklist-table tbody tr.result-info   { background: var(--row-info); }
 .sources { padding-left: 20px; }
 .sources li { margin: 4px 0; }
 
+/* v1.8 (#36): 데이터 안내 — 작은 회색 박스. 비면 섹션 자체가 렌더되지 않음. */
+.data-notes {
+  margin: 16px 0;
+  padding: 10px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--fg-mute);
+  border-radius: var(--radius);
+  color: var(--fg-mute);
+  font-size: 12px;
+}
+.data-notes h4 {
+  margin: 0 0 6px;
+  color: var(--fg-mute);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.data-notes ul { margin: 0; padding-left: 18px; }
+.data-notes li { margin: 2px 0; }
+
 /* Scoring config ----------------------------------------------------------- */
 .json-dump {
   background: var(--surface-weak);
@@ -750,34 +771,73 @@ table.checklist-table tbody tr.result-info   { background: var(--row-info); }
 }
 .offline-banner-icon { font-size: 15px; }
 
-/* v1.11 (#32): 새 버전 안내 */
-.update-banner {
+/* v1.11 (#35): 새 버전 안내 — 플로팅 토스트(상단 중앙).
+   레이아웃을 밀지 않음, 스크롤해도 유지, 자동 사라짐 없음. */
+.update-toast {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 12px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 20px;
-  background: var(--accent-weak);
+  min-width: 280px;
+  max-width: calc(100% - 32px);
+  padding: 10px 14px;
+  background: var(--panel);
   color: var(--fg);
-  border-bottom: 1px solid var(--border);
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  font-size: 14px;
+  animation: update-toast-in 180ms ease-out;
+}
+@keyframes update-toast-in {
+  from { opacity: 0; transform: translate(-50%, -16px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .update-toast { animation: none; }
+}
+.update-toast-msg { font-weight: 600; }
+.update-toast-tag {
+  color: var(--pending);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 6px;
+  background: var(--pending-weak);
+  border: 1px solid var(--pending-border);
+  border-radius: 3px;
+}
+.update-toast-actions { margin-left: auto; display: flex; gap: 8px; }
+.update-toast-primary {
+  padding: 5px 12px;
+  background: var(--accent);
+  color: #fff;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 600;
   font-size: 13px;
 }
-.update-banner-actions { margin-left: auto; display: flex; gap: 8px; }
-.update-banner-actions button {
-  padding: 4px 12px;
+.update-toast-primary:hover { background: var(--accent-hover); }
+.update-toast-close {
+  padding: 5px 10px;
   background: transparent;
-  color: var(--fg);
+  color: var(--fg-mute);
   border: 1px solid var(--border);
   border-radius: 4px;
   cursor: pointer;
   font-size: 12px;
 }
-.update-banner-actions .update-banner-primary {
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
-  font-weight: 600;
+@media (max-width: 500px) {
+  .update-toast { left: 16px; right: 16px; transform: none; max-width: none; }
+  @keyframes update-toast-in {
+    from { opacity: 0; transform: translateY(-16px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
 }
-.update-banner-actions .update-banner-primary:hover { background: var(--accent-hover); }
 
 /* 상장 알림 배너 (헤더 아래, 보유 종목 중 오늘/내일 상장) */
 .listing-banner {

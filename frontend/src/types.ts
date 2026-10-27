@@ -127,6 +127,9 @@ export interface IpoDetail extends IpoSummary {
   checklist: ChecklistItem[]
   // v1.2: 주관사·공동주관사 이름 (사람이 읽는 그대로). 빈 배열이면 미공시.
   underwriters: string[]
+  // v1.8 (#36): 알려진 처리 상황 안내(예: "확약 비율 미공시로 판정 보류").
+  // backend 미반영 응답은 필드가 없을 수 있어 optional. 빈 배열이면 섹션 숨김.
+  data_notes?: string[]
 }
 
 export interface ListParams {

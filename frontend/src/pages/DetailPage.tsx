@@ -333,6 +333,16 @@ export function DetailPage() {
 
       {/* v1.6 (#23): 균등 배정 최소 증거금 섹션 폐지. 안내 매도 전략 문구는 /guide 로 이동 유지. */}
 
+      {/* v1.8 (#36): 데이터 안내 — backend 가 알려주는 처리 상황(예: 미공시로 보류). 비면 숨김. */}
+      {detail.data_notes && detail.data_notes.length > 0 && (
+        <aside className="data-notes" aria-label="데이터 안내">
+          <h4>데이터 안내</h4>
+          <ul>
+            {detail.data_notes.map((n, i) => <li key={i}>{n}</li>)}
+          </ul>
+        </aside>
+      )}
+
       <h3>원문 공시 (DART)</h3>
       {detail.sources.length === 0 ? (
         <p className="empty">연결된 공시 문서가 없습니다.</p>

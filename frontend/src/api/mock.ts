@@ -471,6 +471,11 @@ const seed: Record<string, DetailSeed> = {
       '상장 당일 유통가능 24.1% + 구주매출 0% — 20점.',
     ],
     reject_reasons: [],
+    // v1.8 (#36): data_notes 예시 — INCOMPLETE 상태의 처리 상황을 사람이 읽기 쉽게.
+    data_notes: [
+      '의무보유 확약 비율이 투자설명서와 정정 신고서 모두 미공시로 확정되지 않아 판정을 보류합니다.',
+      '확약 수치가 공시되면 수집 재실행으로 자동 갱신됩니다.',
+    ],
     sources: [
       { doc_type: 'PROSPECTUS', rcept_no: '20261018000444', rcept_dt: '2026-10-18', url: dartUrl('20261018000444') },
       { doc_type: 'PROSPECTUS_AMENDED', rcept_no: '20261022000444', rcept_dt: '2026-10-22', url: dartUrl('20261022000444') },
