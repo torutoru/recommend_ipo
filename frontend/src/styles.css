@@ -58,22 +58,10 @@
 
 * { box-sizing: border-box; }
 
-/* v1.11 (#33): 모바일에서 입력칸 글자 크기 ≥16px — iOS Safari 자동 확대 방지.
-   `(pointer: coarse)` 로 터치 디바이스를 1차 타깃팅하고, 뷰포트 폭도 폴백으로 묶음.
-   viewport 에 maximum-scale=1·user-scalable=no 는 **쓰지 않는다**(접근성). */
-@media (pointer: coarse), (max-width: 768px) {
-  input[type="text"],
-  input[type="password"],
-  input[type="search"],
-  input[type="number"],
-  input[type="email"],
-  input[type="tel"],
-  input[type="url"],
-  select,
-  textarea {
-    font-size: 16px;
-  }
-}
+/* v1.11 (#33·#38): 모바일 입력 ≥16px 규칙은 파일 **끝** 으로 이동.
+   원래 여기 선언한 저-specificity 규칙(input[type="text"] { font-size: 16px })이
+   `.holding-form input[type="text"]`·`.my-add-panel input[type="text"]` 등
+   뒤에 오는 class+attribute 선택자(specificity 0,2,1) 에 덮어씌워져 동작하지 않았음(#38). */
 
 html, body, #root { height: 100%; }
 
@@ -1147,4 +1135,31 @@ table.my-table { width: 100%; border-collapse: collapse; min-width: 640px; }
   .page-my .page-head { flex-wrap: wrap; gap: 8px; }
   .my-table { min-width: 560px; }
   .detail-head .holding-trigger { display: block; margin: 8px 0 0; }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   v1.11 (#33·#38): 모바일 입력 글자 ≥16px — iOS Safari 자동 확대 방지.
+   파일 **끝** 에 + 각 입력 규칙과 동일/상위 specificity 로 선언해 뒤에서 덮는다.
+   viewport 에 maximum-scale=1·user-scalable=no 는 쓰지 않는다(접근성).
+   `(pointer: coarse)` 로 터치 디바이스를 타깃팅, 뷰포트 폭도 폴백으로.
+   ────────────────────────────────────────────────────────────────────────── */
+@media (pointer: coarse), (max-width: 768px) {
+  /* 저-specificity (0,0,1) — 글로벌 input/select/textarea. */
+  input[type="text"],
+  input[type="password"],
+  input[type="search"],
+  input[type="number"],
+  input[type="email"],
+  input[type="tel"],
+  input[type="url"],
+  select,
+  textarea { font-size: 16px; }
+
+  /* class 가 붙은 각 입력 규칙과 동등 이상 specificity 로 명시 override.
+     (CollectBar 수집 키·종목 검색·내 공모주 폼 — iOS 16px 미만이면 포커스 때 자동 확대) */
+  .key-prompt input,                                   /* (0,1,1) */
+  .my-add-panel input[type="text"],                    /* (0,2,1) */
+  .holding-form input[type="text"],                    /* (0,2,1) */
+  .holding-form .holding-memo input[type="text"]       /* (0,3,1) */
+  { font-size: 16px; }
 }
