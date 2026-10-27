@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from . import store
 from .config import get_settings
-from .routers import collect, health, ipos, scoring_config
+from .routers import collect, health, holdings, ipos, scoring_config
 
 
 def create_app() -> FastAPI:
@@ -34,13 +34,14 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=settings.allowed_origins(),
         allow_credentials=False,
-        allow_methods=["GET", "POST"],
+        allow_methods=["GET", "POST", "PUT", "DELETE"],   # 지시 #51 holdings — PUT·DELETE 필요
         allow_headers=["*"],
     )
     app.include_router(health.router, prefix="/api")
     app.include_router(ipos.router, prefix="/api")
     app.include_router(scoring_config.router, prefix="/api")
     app.include_router(collect.router, prefix="/api")
+    app.include_router(holdings.router, prefix="/api")
     return app
 
 

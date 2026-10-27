@@ -4,9 +4,11 @@ import { api } from './api'
 import { CalendarPage } from './pages/CalendarPage'
 import { ListPage } from './pages/ListPage'
 import { DetailPage } from './pages/DetailPage'
+import { MyPage } from './pages/MyPage'
 import { ScoringConfigPage } from './pages/ScoringConfigPage'
 import { GuidePage } from './pages/GuidePage'
 import { Disclaimer } from './components/Disclaimer'
+import { ListingBanner } from './components/ListingBanner'
 import { USE_MOCK } from './config'
 import { subscribeSlow } from './utils/wakeWatcher'
 
@@ -33,6 +35,7 @@ export default function App() {
         <nav className="site-nav">
           <NavLink to="/" end>달력</NavLink>
           <NavLink to="/list">목록</NavLink>
+          <NavLink to="/my">내 공모주</NavLink>
           <NavLink to="/scoring">판정 기준</NavLink>
           <NavLink to="/guide">안내</NavLink>
         </nav>
@@ -42,11 +45,13 @@ export default function App() {
           </div>
         )}
       </header>
+      <ListingBanner />
       <main className="site-main">
         <Routes>
           <Route path="/" element={<CalendarPage />} />
           <Route path="/list" element={<ListPage />} />
           <Route path="/ipos/:id" element={<DetailPage />} />
+          <Route path="/my" element={<MyPage />} />
           <Route path="/scoring" element={<ScoringConfigPage />} />
           <Route path="/guide" element={<GuidePage />} />
           <Route path="*" element={<p>페이지를 찾을 수 없습니다.</p>} />

@@ -149,6 +149,37 @@ class IpoList(BaseModel):
     items: list[IpoSummary]
 
 
+# ---------- 내 공모주 (v1.7, 지시 #51 dd93b259, requirements 24장) ----------
+
+class Holding(BaseModel):
+    """저장: corp_code / shares / price / memo / created_at / updated_at
+    응답 전용(결합): corp_name / listing_date / amount_krw (shares × price)
+    """
+    corp_code: str
+    shares: int
+    price: int
+    memo: str = ""
+    created_at: str
+    updated_at: str
+    # 응답 전용 결합 필드
+    corp_name: Optional[str] = None
+    listing_date: Optional[str] = None
+    amount_krw: int = 0
+
+
+class HoldingUpsertRequest(BaseModel):
+    """PUT /api/holdings/{corp_code} 바디.
+    shares·price 정수 ≥ 1 / memo ≤ 60자 — 검증 실패 시 422.
+    """
+    shares: int = Field(ge=1)
+    price: int = Field(ge=1)
+    memo: str = Field(default="", max_length=60)
+
+
+class HoldingList(BaseModel):
+    items: list[Holding]
+
+
 class HealthResponse(BaseModel):
     status: Literal["ok"] = "ok"
     last_collected_at: Optional[str] = None

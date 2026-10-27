@@ -7,6 +7,7 @@ import type {
   ListParams,
   ScoringConfig,
 } from '../types'
+import type { Holding } from './holdings'
 import { HttpError } from '../utils/httpError'
 import { trackRequest } from '../utils/wakeWatcher'
 
@@ -105,6 +106,35 @@ export async function getCollectStatus(): Promise<CollectStatus> {
 
 // POST 는 자동 재시도 금지(중복 실행 방지). 502/503/504 는 그대로 던지고
 // 호출부(CollectBar)가 getCollectStatus 로 실제 시작 여부를 확인한다.
+// v1.7 (#31): 「내 공모주」 holdings.
+// GET 은 getJson(재시도 budget) 규칙을 따르고, PUT/DELETE 는 재시도 없음(중복 업서트/삭제 위험).
+
+export async function getHoldings(): Promise<Holding[]> {
+  const body = await getJson<{ items: Holding[] }>(`/holdings`)
+  return body.items
+}
+
+export async function putHolding(
+  corpCode: string,
+  body: { shares: number; price: number; memo: string },
+): Promise<Holding> {
+  const res = await doFetch(`/holdings/${encodeURIComponent(corpCode)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (res.ok) return (await res.json()) as Holding
+  const detail = await readDetail(res)
+  throw new HttpError(res.status, detail ?? `HTTP ${res.status} ${res.statusText}`)
+}
+
+export async function deleteHolding(corpCode: string): Promise<void> {
+  const res = await doFetch(`/holdings/${encodeURIComponent(corpCode)}`, { method: 'DELETE' })
+  if (res.ok || res.status === 204) return
+  const detail = await readDetail(res)
+  throw new HttpError(res.status, detail ?? `HTTP ${res.status} ${res.statusText}`)
+}
+
 export async function postCollect(key: string | null): Promise<CollectStartResult> {
   const headers: Record<string, string> = { Accept: 'application/json' }
   if (key) headers['X-Collect-Key'] = key

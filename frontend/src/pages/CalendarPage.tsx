@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api'
+import { holdings } from '../api/holdings'
+// v1.10 (#30): 로컬 미리보기 — prod 에서는 `import.meta.env.DEV` 로 데드 코드 처리.
+import { demoCorpCodes, isListingDemoActive } from '../dev/listingDemo'
 import type { IpoSummary, Verdict } from '../types'
 import { CollectBar } from '../components/CollectBar'
 import { ErrorBox, Loading } from '../components/Loading'
@@ -101,6 +104,18 @@ export function CalendarPage() {
   const [error, setError] = useState<string | null>(null)
   const [selectedDay, setSelectedDay] = useState<string | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
+  // v1.10 (#29): 「내 공모주」 보유 종목의 상장 칩에 ★ 표시.
+  const [heldSet, setHeldSet] = useState<Set<string>>(() => new Set(holdings.list().map(h => h.corp_code)))
+  useEffect(() => holdings.subscribe(() => setHeldSet(new Set(holdings.list().map(h => h.corp_code)))), [])
+  // v1.10 (#30): ?demo=listing 미리보기면 샘플 종목에도 ★ 를 표시(DEV 전용).
+  const starSet = useMemo(() => {
+    if (import.meta.env.DEV && items && isListingDemoActive()) {
+      const s = new Set(heldSet)
+      for (const code of demoCorpCodes(items)) s.add(code)
+      return s
+    }
+    return heldSet
+  }, [heldSet, items])
 
   const from = firstDayOfMonth(cursor)
   const to = lastDayOfMonth(cursor)
@@ -219,7 +234,11 @@ export function CalendarPage() {
                     <div className="cal-date">{cell.date.getDate()}</div>
                     <div className="cal-chips">
                       {visible.map((ev, i) => (
-                        <EventChip key={`${ev.item.id}-${ev.type}-${i}`} ev={ev} />
+                        <EventChip
+                          key={`${ev.item.id}-${ev.type}-${i}`}
+                          ev={ev}
+                          isHeld={starSet.has(ev.item.id)}
+                        />
                       ))}
                       {overflow > 0 && (
                         <span className="cal-more">+{overflow} 더보기</span>
@@ -248,7 +267,10 @@ export function CalendarPage() {
                           {VERDICT_LABEL[verdictKey(ev.item.verdict)]}
                         </span>
                         <span className="cal-item-type">{ev.type === 'LISTING' ? '상장' : '청약'}</span>
-                        <span className="cal-item-name">{ev.item.corp_name}</span>
+                        <span className="cal-item-name">
+                          {ev.type === 'LISTING' && starSet.has(ev.item.id) ? '★ ' : ''}
+                          {ev.item.corp_name}
+                        </span>
                         <span className="cal-item-market">{marketLabel(ev.item.market)}</span>
                       </Link>
                     </li>
@@ -267,25 +289,27 @@ export function CalendarPage() {
   )
 }
 
-function EventChip({ ev }: { ev: CalEvent }) {
+function EventChip({ ev, isHeld }: { ev: CalEvent; isHeld: boolean }) {
   const key = verdictKey(ev.item.verdict)
   const isListing = ev.type === 'LISTING'
   const label = isListing ? '상장' : '청약'
   const roleLabel = VERDICT_LABEL[key]
   const warn = ev.item.verdict.status === 'CORRECTION'
-  // title/aria-label: "회사명 · 청약 · 추천 A" (+ 정정 종목은 "· 일정 변경 가능")
-  const title = `${ev.item.corp_name} · ${label} · ${roleLabel}${warn ? ' · 일정 변경 가능' : ''}`
+  // v1.10 (#29): 보유 종목의 상장 칩에 ★ 접두. 접근성 라벨에도 "· 보유".
+  const star = isListing && isHeld
+  // title/aria-label: "회사명 · 청약 · 추천 A" (+ 정정 종목은 "· 일정 변경 가능"; + 보유 종목은 "· 보유")
+  const title = `${ev.item.corp_name} · ${label} · ${roleLabel}${warn ? ' · 일정 변경 가능' : ''}${star ? ' · 보유' : ''}`
   // v1.8 (#21 4·5번) + v1.9 (⚠ 제거):
   //   - 칩에는 회사명만. 라벨·등급·경고 아이콘 모두 제거.
   //   - 정정 종목의 "일정 변경 가능" 안내는 title/aria-label·날짜 패널·상세 배너에만 유지.
-  //   - 상장 칩은 상태 색 대신 초록, 본문 "(상장) 회사명" 접두사.
+  //   - 상장 칩은 상태 색 대신 금색, 본문 "(상장) 회사명" 접두사.
   const cls = isListing
     ? 'cal-chip chip-listing'
     : `cal-chip ${VERDICT_CLS[key]}`
   return (
     <span className={cls} title={title} aria-label={title}>
       <span className="chip-name">
-        {isListing ? `(상장) ${ev.item.corp_name}` : ev.item.corp_name}
+        {isListing ? `${star ? '★ ' : ''}(상장) ${ev.item.corp_name}` : ev.item.corp_name}
       </span>
     </span>
   )

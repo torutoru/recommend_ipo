@@ -10,6 +10,7 @@ import type {
   ListParams,
   ScoringConfig,
 } from '../types'
+import type { Holding } from './holdings'
 import { fmtPct, fmtRatio } from '../utils/format'
 import { HttpError } from '../utils/httpError'
 
@@ -1112,4 +1113,57 @@ export async function postCollect(key: string | null): Promise<CollectStartResul
 
 export async function getHealth(): Promise<Health> {
   return delay({ status: 'ok', last_collected_at: collectState.last_collected_at })
+}
+
+// --- v1.7 (#31): 「내 공모주」 — 메모리 저장 (목업) --------------------------
+// mock fixture 는 건드리지 않음(IPO 목록은 그대로).
+const mockHoldings: Record<string, Holding> = {}
+
+function mockHoldingJoin(h: Holding): Holding {
+  const ipo = summaries.find(x => x.id === h.corp_code)
+  return {
+    ...h,
+    corp_name: ipo?.corp_name ?? null,
+    listing_date: ipo?.listing_date ?? null,
+    amount_krw: h.shares * h.price,
+  }
+}
+
+export async function getHoldings(): Promise<Holding[]> {
+  return delay(Object.values(mockHoldings).map(mockHoldingJoin))
+}
+
+export async function putHolding(
+  corpCode: string,
+  body: { shares: number; price: number; memo: string },
+): Promise<Holding> {
+  if (!summaries.some(x => x.id === corpCode)) {
+    await delay(null, 150)
+    throw new HttpError(404, `목업에 해당 종목이 없습니다: ${corpCode}`)
+  }
+  if (!Number.isInteger(body.shares) || body.shares < 1) {
+    await delay(null, 100)
+    throw new HttpError(422, '배정 수량은 1 이상의 정수여야 합니다.')
+  }
+  if (!Number.isInteger(body.price) || body.price < 1) {
+    await delay(null, 100)
+    throw new HttpError(422, '공모가는 1 이상의 정수여야 합니다.')
+  }
+  const now = new Date().toISOString()
+  const existing = mockHoldings[corpCode]
+  const next: Holding = {
+    corp_code: corpCode,
+    shares: body.shares,
+    price: body.price,
+    memo: (body.memo ?? '').slice(0, 60),
+    created_at: existing?.created_at ?? now,
+    updated_at: now,
+  }
+  mockHoldings[corpCode] = next
+  return delay(mockHoldingJoin(next))
+}
+
+export async function deleteHolding(corpCode: string): Promise<void> {
+  delete mockHoldings[corpCode]
+  await delay(null, 120)
 }

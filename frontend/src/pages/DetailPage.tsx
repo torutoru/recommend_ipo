@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../api'
+import { holdings, type Holding } from '../api/holdings'
 import type { IpoDetail } from '../types'
 import {
   gradeExecGuide,
@@ -8,6 +9,7 @@ import {
   VerdictBadge,
 } from '../components/Badge'
 import { Checklist } from '../components/Checklist'
+import { HoldingForm } from '../components/HoldingForm'
 import { ErrorBox, Loading } from '../components/Loading'
 import {
   competitionRateTypeLabel,
@@ -92,6 +94,9 @@ export function DetailPage() {
   const { id } = useParams<{ id: string }>()
   const [detail, setDetail] = useState<IpoDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // v1.10 (#29): 「내 공모주」 상태·인라인 폼.
+  const [myHolding, setMyHolding] = useState<Holding | null>(() => id ? holdings.get(id) : null)
+  const [formOpen, setFormOpen] = useState(false)
 
   // v1.6 (#23): shares 쿼리 제거 — 증거금 영역 폐지.
   useEffect(() => {
@@ -99,11 +104,18 @@ export function DetailPage() {
     let cancelled = false
     setDetail(null)
     setError(null)
+    setMyHolding(holdings.get(id))
+    setFormOpen(false)
     api
       .getIpo(id)
       .then(d => { if (!cancelled) setDetail(d) })
       .catch(e => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)) })
     return () => { cancelled = true }
+  }, [id])
+
+  useEffect(() => {
+    if (!id) return
+    return holdings.subscribe(() => setMyHolding(holdings.get(id)))
   }, [id])
 
   if (!id) return <p>잘못된 요청입니다.</p>
@@ -132,7 +144,31 @@ export function DetailPage() {
         <h2>
           {detail.corp_name}
           <span className="verdict-wrap"><VerdictBadge verdict={detail.verdict} /></span>
+          {/* v1.10 (#29): 「+ 청약 결과 입력」 (등록된 종목이면 「내 공모주 수정」) */}
+          <button type="button" className="holding-trigger"
+            onClick={() => setFormOpen(v => !v)}>
+            {myHolding ? '내 공모주 수정' : '+ 청약 결과 입력'}
+          </button>
         </h2>
+        {formOpen && (
+          <div className="detail-holding-form">
+            <HoldingForm
+              corpCode={detail.id}
+              defaultPrice={detail.final_price}
+              onSaved={() => setFormOpen(false)}
+              onCancel={() => setFormOpen(false)}
+              onDeleted={() => setFormOpen(false)}
+            />
+          </div>
+        )}
+        {myHolding && !formOpen && (
+          <p className="detail-holding-summary">
+            내 공모주 — <strong>{myHolding.shares.toLocaleString('ko-KR')}주</strong>
+            {' · '}공모가 <strong>{myHolding.price.toLocaleString('ko-KR')}원</strong>
+            {' · '}투자금액 <strong>{(myHolding.shares * myHolding.price).toLocaleString('ko-KR')}원</strong>
+            {myHolding.memo && <> · 메모 <em>{myHolding.memo}</em></>}
+          </p>
+        )}
         <dl className="meta">
           <div><dt>시장</dt><dd>{marketLabel(detail.market)}</dd></div>
           <div><dt>청약일</dt><dd>{fmtDateRange(detail.subscription_start, detail.subscription_end)}</dd></div>

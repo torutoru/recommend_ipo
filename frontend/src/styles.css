@@ -704,3 +704,315 @@ table.checklist-table tbody tr.result-info   { background: var(--row-info); }
   margin-left: auto;
   margin-right: auto;
 }
+
+/* v1.10 (#29): 「내 공모주」 ------------------------------------------------- */
+
+/* 상장 알림 배너 (헤더 아래, 보유 종목 중 오늘/내일 상장) */
+.listing-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px 14px;
+  flex-wrap: wrap;
+  padding: 10px 20px;
+  background: var(--accent-weak);
+  color: var(--fg);
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.listing-banner-icon { font-size: 18px; }
+.listing-banner-list {
+  margin: 0;
+  padding-left: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 300px;
+  min-width: 0;
+}
+.listing-banner-list li { line-height: 1.4; }
+.listing-banner-tag {
+  color: var(--pending);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 6px;
+  background: var(--pending-weak);
+  border: 1px solid var(--pending-border);
+  border-radius: 3px;
+}
+.listing-banner-actions { margin-left: auto; display: flex; gap: 8px; }
+.listing-banner-link {
+  padding: 4px 10px;
+  color: var(--accent);
+  font-weight: 600;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  font-size: 12px;
+}
+.listing-banner-link:hover { text-decoration: none; background: var(--accent); color: #fff; }
+.listing-banner-actions button {
+  padding: 4px 10px;
+  background: transparent;
+  color: var(--fg-mute);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+/* /my 페이지 */
+.page-my .page-head { align-items: center; }
+.my-add-btn {
+  padding: 7px 14px;
+  background: var(--accent);
+  color: #fff;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 13px;
+}
+.my-add-btn:hover { background: var(--accent-hover); }
+.my-retry-btn {
+  margin-left: 10px;
+  padding: 3px 10px;
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.my-retry-btn:hover { background: var(--accent-weak); }
+
+.my-empty {
+  text-align: center;
+  padding: 40px 20px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--fg-mute);
+}
+.my-empty p { margin: 0 0 8px; color: var(--fg); }
+.my-empty .muted { color: var(--fg-mute); font-size: 12px; }
+.my-empty .my-add-btn { margin-top: 14px; }
+
+.my-table-wrap {
+  overflow-x: auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+table.my-table { width: 100%; border-collapse: collapse; min-width: 640px; }
+.my-table th, .my-table td {
+  padding: 10px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  vertical-align: top;
+}
+.my-table thead th {
+  background: var(--surface);
+  color: var(--fg-mute);
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.my-table tbody tr:last-child td { border-bottom: 0; }
+.my-table .num, .my-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.my-table tfoot td {
+  background: var(--surface-weak);
+  font-weight: 600;
+  border-top: 1px solid var(--border);
+}
+.my-table .status-today { color: var(--pending); font-weight: 700; }
+.my-table .status-past { color: var(--fg-mute); }
+.my-table .status-undated { color: var(--fg-mute); border-bottom: 1px dotted var(--fg-mute); cursor: help; }
+.my-table .my-actions { white-space: nowrap; }
+.my-table .my-actions button {
+  margin: 0 2px;
+  padding: 4px 10px;
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.my-table .my-actions button:hover { background: var(--accent-weak); }
+.my-table .my-actions .holding-danger {
+  color: var(--reject);
+  border-color: var(--reject-border);
+}
+.my-table .my-memo-row td {
+  padding: 4px 12px 10px;
+  color: var(--fg-mute);
+  font-size: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.my-table .my-edit-row td {
+  background: var(--accent-weak);
+  padding: 14px 16px;
+}
+
+.my-add-panel {
+  margin: 16px 0;
+  padding: 14px 16px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.my-add-panel h3 { margin: 0 0 10px; font-size: 14px; }
+.my-add-panel input[type="text"] {
+  width: 100%;
+  max-width: 320px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--fg);
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+.my-add-list {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.my-add-list li { border-bottom: 1px dashed var(--border); }
+.my-add-list li:last-child { border-bottom: 0; }
+.my-add-list button {
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
+  background: transparent;
+  color: var(--fg);
+  border: 0;
+  cursor: pointer;
+  font-size: 13px;
+}
+.my-add-list button:hover { background: var(--accent-weak); }
+.my-add-list button.picked { background: var(--accent-weak); font-weight: 600; }
+.my-add-list .muted { padding: 10px; color: var(--fg-mute); font-size: 12px; }
+.my-add-list button .muted { padding: 0 0 0 4px; }
+
+/* 공통 폼 (DetailPage inline + MyPage edit/add) */
+.holding-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 16px;
+  max-width: 540px;
+}
+.holding-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.holding-form label span {
+  font-size: 12px;
+  color: var(--fg-mute);
+}
+.holding-form input[type="text"] {
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--fg);
+  font-size: 13px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.holding-form input[type="text"]:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.holding-form .holding-memo { grid-column: 1 / -1; }
+.holding-form .holding-memo input[type="text"] { font-family: inherit; }
+.holding-total {
+  grid-column: 1 / -1;
+  font-size: 13px;
+  color: var(--fg);
+  padding: 6px 0;
+}
+.holding-err {
+  grid-column: 1 / -1;
+  color: var(--reject);
+  font-size: 12px;
+  margin: 0;
+}
+.holding-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+.holding-actions button {
+  padding: 7px 14px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 13px;
+}
+.holding-actions button[type="submit"] {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+  font-weight: 600;
+}
+.holding-actions button[type="submit"]:hover { background: var(--accent-hover); }
+.holding-actions .holding-danger {
+  color: var(--reject);
+  border-color: var(--reject-border);
+}
+
+/* DetailPage: 「+ 청약 결과 입력」 트리거 + 요약 */
+.detail-head .holding-trigger {
+  padding: 5px 12px;
+  background: var(--accent);
+  color: #fff;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  margin-left: 10px;
+  vertical-align: middle;
+}
+.detail-head .holding-trigger:hover { background: var(--accent-hover); }
+.detail-holding-form {
+  margin: 14px 0 0;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.detail-holding-summary {
+  margin: 10px 0 0;
+  padding: 8px 12px;
+  background: var(--accent-weak);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 13px;
+  color: var(--fg);
+}
+
+/* 모바일 */
+@media (max-width: 500px) {
+  .holding-form { grid-template-columns: 1fr; }
+  .listing-banner { padding: 8px 12px; }
+  .listing-banner-actions { margin-left: 0; flex: 1 1 100%; justify-content: flex-end; }
+  .page-my .page-head { flex-wrap: wrap; gap: 8px; }
+  .my-table { min-width: 560px; }
+  .detail-head .holding-trigger { display: block; margin: 8px 0 0; }
+}

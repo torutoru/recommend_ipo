@@ -45,4 +45,14 @@ export const api = {
   async postCollect(key: string | null) {
     return (await load()).postCollect(key)
   },
+  // v1.7 (#31): 「내 공모주」 — getHoldings/putHolding/deleteHolding.
+  async getHoldings() {
+    return (await load()).getHoldings()
+  },
+  async putHolding(corpCode: string, body: { shares: number; price: number; memo: string }) {
+    return (await load()).putHolding(corpCode, body)
+  },
+  async deleteHolding(corpCode: string) {
+    return (await load()).deleteHolding(corpCode)
+  },
 }

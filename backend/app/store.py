@@ -76,6 +76,18 @@ CREATE TABLE IF NOT EXISTS collect_runs (
     note          TEXT
 );
 
+-- 지시 #51 (dd93b259, requirements 24장, api-contract v1.7): 내 공모주 holdings
+-- 수집(collect)·재파싱은 이 테이블을 건드리지 않는다. ipos.corp_code 와 느슨하게 결합(FK 없음) —
+-- 응답에서만 corp_name·listing_date 를 결합. ipos 가 수집으로 바뀌어도 holdings 는 유지.
+CREATE TABLE IF NOT EXISTS holdings (
+    corp_code  TEXT PRIMARY KEY,
+    shares     INTEGER NOT NULL,
+    price      INTEGER NOT NULL,
+    memo       TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_ipos_subscription_start ON ipos(subscription_start);
 CREATE INDEX IF NOT EXISTS idx_ipos_listing_date ON ipos(listing_date);
 """

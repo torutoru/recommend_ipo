@@ -1499,6 +1499,29 @@ def test_list_disclosures_passes_corp_code(monkeypatch):
     assert "corp_code" not in captured["params"]
 
 
+def test_51_52_incremental_fetch_includes_all_disclosure_types(client, monkeypatch):
+    """지시 #51/#52: `_fetch_list` 가 pblntf_detail_ty=None(전체 유형) 으로 호출되는지 검증.
+
+    기본값 "C001" 로 좁히면 신규 ISSUANCE_REPORT 가 증분에서 빠져 listing_date 가
+    영구 null 로 남는다(이에스티 사례).
+    """
+    from app import collect_service, dart_client
+    captured_params: list[dict] = []
+
+    def fake_list(**kw):
+        captured_params.append(kw)
+        return _list_resp([])
+
+    monkeypatch.setattr(dart_client, "list_disclosures", fake_list)
+    client.post("/api/collect")
+    _wait_done(client)
+
+    # 1회 이상 호출됐고, 최소 한 번은 pblntf_detail_ty=None
+    assert len(captured_params) >= 1
+    assert any(c.get("pblntf_detail_ty") is None for c in captured_params), \
+        f"all calls: {[c.get('pblntf_detail_ty') for c in captured_params]}"
+
+
 def test_persistence_check_failed_marks_failed(client, monkeypatch):
     """지시 #14 — 수집은 성공했는데 DB 에 쓰기가 안 됐으면 FAILED.
 
