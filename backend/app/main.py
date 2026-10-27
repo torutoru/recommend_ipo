@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from . import store
+from . import maintenance, store
 from .config import get_settings
 from .routers import collect, health, holdings, ipos, scoring_config
 
@@ -25,6 +25,8 @@ def create_app() -> FastAPI:
     except Exception:
         import logging
         logging.getLogger(__name__).exception("init_db / parse_warnings 마스킹 중 예외 발생 — 요청 시 재시도")
+    # 지시 #54: 일회성 비IPO 45개 정리 (다음 릴리스에서 삭제 예정)
+    maintenance.run_startup_cleanup()
     app = FastAPI(
         title="recommend_ipo backend",
         version="0.1.0",
