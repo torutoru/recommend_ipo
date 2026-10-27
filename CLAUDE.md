@@ -4,6 +4,8 @@ DART 공시(투자설명서·정정 증권신고서·증권발행실적보고서
 
 이 파일은 루트와 하위 폴더에서 실행되는 모든 세션(pm/backend/frontend)이 함께 읽는다. 역할별 상세는 각 폴더의 `CLAUDE.md`에 둔다.
 
+> **새 세션은 먼저 [docs/HANDOFF.md](docs/HANDOFF.md)(전체 인계)와 자기 역할의 `backend/HANDOFF.md`·`frontend/HANDOFF.md`를 읽는다.** 지금까지의 결정·이력·함정·남은 일이 정리되어 있다. `.claude/co-work/`(git 제외)가 없는 환경이면 `docs/decisions/` 사본으로 복원한다.
+
 ## 구조
 ```
 recommend_ipo/

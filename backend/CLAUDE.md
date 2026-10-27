@@ -1,5 +1,7 @@
 # backend 세션
 
+**새 세션은 먼저 `backend/HANDOFF.md` 와 루트 `../docs/HANDOFF.md` 를 읽는다.**
+
 루트 `../CLAUDE.md` 가 프로젝트 전체 규약(구조·협업·감시기·공통 규칙·연속 운영)을 담당한다. 이 파일은 **backend 전용 상세**만 적는다.
 
 ## 담당 영역
