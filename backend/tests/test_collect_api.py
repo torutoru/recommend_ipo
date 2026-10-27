@@ -1499,27 +1499,99 @@ def test_list_disclosures_passes_corp_code(monkeypatch):
     assert "corp_code" not in captured["params"]
 
 
-def test_51_52_incremental_fetch_includes_all_disclosure_types(client, monkeypatch):
-    """지시 #51/#52: `_fetch_list` 가 pblntf_detail_ty=None(전체 유형) 으로 호출되는지 검증.
+def test_53_c001_discovers_new_corps_only(client, monkeypatch):
+    """지시 #53: 신규 corp 는 **C001(지분증권) 공시로만** 발견.
 
-    기본값 "C001" 로 좁히면 신규 ISSUANCE_REPORT 가 증분에서 빠져 listing_date 가
-    영구 null 로 남는다(이에스티 사례).
+    v33 회귀(비IPO 45개 유입)에 대한 재발 방지 — 전 유형 조회 결과에 들어온
+    새 corp(펀드·SPAC 등) 는 **DB 에 없고 C001 공시도 없으면** 버려야 한다.
     """
     from app import collect_service, dart_client
     captured_params: list[dict] = []
 
     def fake_list(**kw):
         captured_params.append(kw)
-        return _list_resp([])
+        pblntf = kw.get("pblntf_detail_ty")
+        if pblntf == "C001":
+            # 신규 corp 발견: 정상 IPO 하나
+            return _list_resp([_disc("20261027000001", "증권신고서(지분증권)",
+                                     "99998888", "정상IPO")])
+        # 전 유형 호출 — 펀드 신고서가 섞여 있다. existing_corp_codes 비어 있어 모두 무시되어야.
+        return _list_resp([
+            _disc("20261027000099", "증권신고서(집합투자증권)",
+                  "11111111", "BNK투자증권"),
+            _disc("20261027000100", "증권신고서(채무증권)",
+                  "22222222", "채권발행사"),
+        ])
 
     monkeypatch.setattr(dart_client, "list_disclosures", fake_list)
+    monkeypatch.setattr(dart_client, "download_document_zip",
+                        lambda **kw: _zip_bytes(_MIN_XML))
+    client.post("/api/collect")
+    s = _wait_done(client)
+
+    # existing_corp_codes 가 비어 있어도 C001 는 호출되고(신규 corp 발견용),
+    # 전 유형 호출은 skip 되거나 결과가 무시된다. 어쨌든 비IPO 2개는 처리되지 않음.
+    processed = {f["corp_code"] for f in s.get("failures", [])}
+    processed |= set()
+    # 운영 API 로 확인: 11111111, 22222222 는 저장되지 않음
+    r1 = client.get("/api/ipos/11111111")
+    r2 = client.get("/api/ipos/22222222")
+    assert r1.status_code == 404
+    assert r2.status_code == 404
+    # C001 는 최소 1회 호출됨
+    assert any(p.get("pblntf_detail_ty") == "C001" for p in captured_params)
+
+
+def test_53_existing_corp_receives_all_types(client, monkeypatch):
+    """지시 #53: 기존 종목(existing_corp_codes) 은 **전 유형 조회로** 추가 공시 수용.
+
+    이에스티처럼 증권발행실적보고서가 ISSUANCE_REPORT 로 들어오면 재처리 트리거.
+    """
+    from app import collect_service, dart_client, store
+
+    # 사전: 기존 종목 (parser_version=current 로 저장해 stale 아님)
+    with store.connect() as conn:
+        store.upsert_ipo(
+            conn, corp_code="01378005", corp_name="이에스티", market="KOSDAQ",
+            subscription_start=None, subscription_end=None, listing_date=None,
+            band_low=None, band_high=None, final_price=None, price_position=None,
+            competition_rate=None, competition_rate_type=None,
+            demand_quantity=None, demand_amount_krw=None,
+            lockup_ratio=None, lockup_ratio_basis=None,
+            tradable_ratio=None, old_share_ratio=None,
+            new_share_count=None, old_share_count=None,
+            total_offering_count=None, offering_amount_krw=None,
+            report_rcept_no="20261020000144",
+            parser_version="v34",  # 현재 버전 — stale 아님
+            price_confirm_date=None,
+            demand_forecast_start=None, demand_forecast_end=None,
+            correction_requested_at=None, correction_amended_at=None,
+            underwriters_json=None,
+        )
+
+    captured_params: list[dict] = []
+
+    def fake_list(**kw):
+        captured_params.append(kw)
+        if kw.get("pblntf_detail_ty") == "C001":
+            # 증분 C001 에는 신규 공시 없음
+            return _list_resp([])
+        # 전 유형: 기존 종목(01378005) 의 ISSUANCE_REPORT
+        return _list_resp([
+            _disc("20261027000044", "증권발행실적보고서",
+                  "01378005", "이에스티"),
+        ])
+
+    monkeypatch.setattr(dart_client, "list_disclosures", fake_list)
+    monkeypatch.setattr(dart_client, "download_document_zip",
+                        lambda **kw: _zip_bytes(_MIN_XML))
     client.post("/api/collect")
     _wait_done(client)
 
-    # 1회 이상 호출됐고, 최소 한 번은 pblntf_detail_ty=None
-    assert len(captured_params) >= 1
-    assert any(c.get("pblntf_detail_ty") is None for c in captured_params), \
-        f"all calls: {[c.get('pblntf_detail_ty') for c in captured_params]}"
+    # C001 과 전 유형 둘 다 호출됨
+    types_called = {p.get("pblntf_detail_ty") for p in captured_params}
+    assert "C001" in types_called
+    assert None in types_called
 
 
 def test_persistence_check_failed_marks_failed(client, monkeypatch):

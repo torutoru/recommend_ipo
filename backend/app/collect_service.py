@@ -171,9 +171,8 @@ def _run_safely() -> None:
 def _run() -> None:
     store.init_db()
     bgn, end = _date_range()
-    disclosures = _fetch_list(bgn, end)
 
-    # 기존 접수번호 집합 — 신규 판별
+    # 기존 접수번호 집합 — 신규 판별 (조회 전략 결정에 필요하므로 먼저 로드)
     # parser_version 이 현재 코드 버전과 다른 종목은 "변화 없음" 분기에서 빼내 재파싱 (지시 #16)
     with store.connect() as conn:
         known = store.known_rcept_nos(conn)
@@ -186,6 +185,22 @@ def _run() -> None:
             existing_corp_codes.add(r["corp_code"])
             if (r["parser_version"] or "") != collect_mod.PARSER_VERSION:
                 stale_corp_codes.add(r["corp_code"])
+
+    # 지시 #53: 2단계 조회 전략.
+    # 1) 메인 조회는 C001(지분증권 증권신고서) — 신규 corp 를 **IPO 후보로만 발견** (펀드·SPAC·채권 유입 방지).
+    # 2) 기존 종목(existing_corp_codes) 에 한해 전 유형 조회 — 증권발행실적보고서 등 수용 (이에스티 사례).
+    disclosures = _fetch_list(bgn, end)   # pblntf_detail_ty="C001" 기본값
+    if existing_corp_codes:
+        full_disclosures = _fetch_list(bgn, end, pblntf_detail_ty=None)
+        seen_rcept = {d.get("rcept_no") for d in disclosures}
+        for d in full_disclosures:
+            if (
+                d.get("corp_code") in existing_corp_codes
+                and d.get("rcept_no") not in seen_rcept
+                and collect_mod.classify_report(d.get("report_nm", "")) is not None
+            ):
+                disclosures.append(d)
+                seen_rcept.add(d.get("rcept_no"))
 
     # IPO 후보 그룹핑
     grouped = collect_mod.group_by_corp(disclosures)
