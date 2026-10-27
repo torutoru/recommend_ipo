@@ -71,13 +71,21 @@ def _underwriters_from_row(row: dict) -> list[str]:
         return []
 
 
+_CORE_LABEL_PATTERNS = (
+    "[발행조건확정]", "[기재정정]", "[정정제출요구]", "[첨부정정]",
+)
+
+
 def _data_notes_from_row(row: dict) -> list[str]:
     """지시 #56 (api-contract v1.8, requirements 27장): 상세 응답 전용 사용자 안내 문구.
 
+    지시 #57 수정: 같은 날 공시가 있을 때 날짜 비교(>) 는 미동작 → **rcept_no 비교** 로.
+    rcept_no 는 YYYYMMDD + 순번 — 접수 순서 보장.
+
     현재 커버 사례:
-    - **[첨부정정] 공시**: core_rcept(report_rcept_no) 보다 **더 최근** 의 `[첨부정정]` 공시가
-      sources 에 있으면 "N년 N월 N일 [첨부정정] 증권신고서는 본문 원문이 없어 **core 공시 날짜** [기재정정] 공시 기준으로 표시합니다."
-    - **preserved**: ipos.report_rcept_no 는 있지만 지표가 전부 null 이면 "정본 공시 없음 — 기존 지표 보존" 안내는 현재 미구현(preserved 상태를 응답 레벨에서 판정 어려움). 다음 라운드에 추가.
+    - **[첨부정정] 공시가 core 보다 접수 순서상 뒤**: "MM월 DD일 [첨부정정] 증권신고서는 본문 원문이
+      없어 MM월 DD일 [기재정정] 공시 기준으로 표시합니다."
+    - preserved(지표 전부 null) 는 다음 라운드.
     """
     notes: list[str] = []
     sources = row.get("sources") or []
@@ -85,38 +93,50 @@ def _data_notes_from_row(row: dict) -> list[str]:
     if not sources or not core_rcept:
         return notes
 
-    # core 공시의 rcept_dt 찾기
+    # core 공시 메타 — rcept_dt / report_nm
     core_rcept_dt: Optional[str] = None
+    core_report_nm: str = ""
     for s in sources:
         if s.get("rcept_no") == core_rcept:
             core_rcept_dt = s.get("rcept_dt")
+            core_report_nm = s.get("report_nm") or ""
             break
 
-    # [첨부정정] 중 core 보다 더 최근 공시 수집
+    core_label = _core_prefix_label(core_report_nm)
+
+    # [첨부정정] 중 core 보다 **접수 순서상 뒤** (rcept_no 비교) 공시 수집
     for s in sources:
         report_nm = s.get("report_nm") or ""
+        rcept_no = s.get("rcept_no") or ""
         rcept_dt = s.get("rcept_dt") or ""
         if "[첨부정정]" not in report_nm:
             continue
-        if core_rcept_dt and rcept_dt > core_rcept_dt:
-            # 사용자용 문구 — 날짜만 노출, 비밀값·경로 없음
+        if rcept_no > core_rcept:
             notes.append(
                 f"{_format_date_korean(rcept_dt)} [첨부정정] 증권신고서는 본문 원문이 없어 "
-                f"{_format_date_korean(core_rcept_dt)} 공시 기준으로 표시합니다."
+                f"{_format_date_korean(core_rcept_dt)} {core_label} 공시 기준으로 표시합니다."
             )
-            break   # 중복 방지 — 한 종목에 1건만
+            break
 
     return notes
 
 
+def _core_prefix_label(report_nm: str) -> str:
+    """core 공시의 `[발행조건확정]` / `[기재정정]` 등 접두 라벨. 못 찾으면 빈 문자열."""
+    for pat in _CORE_LABEL_PATTERNS:
+        if pat in report_nm:
+            return pat
+    return ""
+
+
 def _format_date_korean(ymd: Optional[str]) -> str:
-    """`YYYY-MM-DD` → `MM/DD` (연도 생략, 사용자 친화)."""
+    """`YYYY-MM-DD` → `M월 D일` (연도 생략, 사용자 친화)."""
     if not ymd:
         return ""
     try:
         parts = ymd.split("-")
         if len(parts) == 3:
-            return f"{int(parts[1])}/{int(parts[2])}"
+            return f"{int(parts[1])}월 {int(parts[2])}일"
     except Exception:
         pass
     return ymd

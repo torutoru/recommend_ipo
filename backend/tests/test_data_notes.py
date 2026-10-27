@@ -34,7 +34,7 @@ def _upsert(conn, corp_code: str, corp_name: str, report_rcept_no: str) -> None:
 
 
 def test_56_data_notes_attachment_only_newer_than_core():
-    """core 보다 최근의 [첨부정정] 이 sources 에 있으면 data_notes 1건."""
+    """core 보다 접수 순서상 뒤인 [첨부정정] 이 sources 에 있으면 data_notes 1건."""
     with store.connect() as conn:
         _upsert(conn, "01950720", "제논", report_rcept_no="20261026000001")
         store.replace_sources(conn, "01950720", [
@@ -43,8 +43,8 @@ def test_56_data_notes_attachment_only_newer_than_core():
              "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20261026000001",
              "report_nm": "[기재정정]증권신고서(지분증권)"},
             {"doc_type": "REGISTRATION_AMENDED",
-             "rcept_no": "20261026000367", "rcept_dt": "2026-10-27",
-             "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20261026000367",
+             "rcept_no": "20261027000367", "rcept_dt": "2026-10-27",
+             "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20261027000367",
              "report_nm": "[첨부정정]증권신고서(지분증권)"},
         ])
     row = store.get_ipo("01950720")
@@ -52,11 +52,60 @@ def test_56_data_notes_attachment_only_newer_than_core():
     assert len(detail.data_notes) == 1
     note = detail.data_notes[0]
     assert "[첨부정정]" in note
-    assert "10/27" in note
-    assert "10/26" in note
+    assert "10월 27일" in note
+    assert "10월 26일" in note
+    assert "[기재정정]" in note
     # 비밀값·URL 없음
     assert "https://" not in note
     assert "rcpNo=" not in note
+
+
+def test_57_data_notes_same_day_attachment_newer_by_rcept_no():
+    """지시 #57: 제논 실데이터 — core 와 [첨부정정] 이 같은 날(10/26) 이고 접수 순서가 뒤면 안내."""
+    with store.connect() as conn:
+        _upsert(conn, "01950720", "제논", report_rcept_no="20261026000001")
+        store.replace_sources(conn, "01950720", [
+            {"doc_type": "REGISTRATION_AMENDED",
+             "rcept_no": "20261026000001", "rcept_dt": "2026-10-26",
+             "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20261026000001",
+             "report_nm": "[기재정정]증권신고서(지분증권)"},
+            {"doc_type": "REGISTRATION_AMENDED",
+             "rcept_no": "20261026000367", "rcept_dt": "2026-10-26",
+             "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20261026000367",
+             "report_nm": "[첨부정정]증권신고서(지분증권)"},
+        ])
+    row = store.get_ipo("01950720")
+    detail = _detail_from_row(row)
+    assert len(detail.data_notes) == 1
+    note = detail.data_notes[0]
+    # 제논 실데이터 형태: "10월 26일 [첨부정정] 증권신고서는 본문 원문이 없어 10월 26일 [기재정정] 공시 기준으로 표시합니다."
+    assert "10월 26일 [첨부정정]" in note
+    assert "10월 26일 [기재정정] 공시" in note
+    assert "본문 원문이 없어" in note
+
+
+def test_57_data_notes_fallback_label_when_core_report_nm_missing():
+    """core 의 report_nm 에 [...] 접두가 없으면 '공시' 로 폴백."""
+    with store.connect() as conn:
+        _upsert(conn, "99999999", "테스트", report_rcept_no="20261026000001")
+        store.replace_sources(conn, "99999999", [
+            {"doc_type": "REGISTRATION_AMENDED",
+             "rcept_no": "20261026000001", "rcept_dt": "2026-10-26",
+             "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20261026000001",
+             "report_nm": "증권신고서(지분증권)"},   # 접두 없음
+            {"doc_type": "REGISTRATION_AMENDED",
+             "rcept_no": "20261026000367", "rcept_dt": "2026-10-26",
+             "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20261026000367",
+             "report_nm": "[첨부정정]증권신고서(지분증권)"},
+        ])
+    row = store.get_ipo("99999999")
+    detail = _detail_from_row(row)
+    assert len(detail.data_notes) == 1
+    note = detail.data_notes[0]
+    # 접두 라벨 없으면 "공시" 가 두 번 반복되지 않도록 — "10월 26일  공시" 형태 (라벨 빈 문자열)
+    assert "10월 26일" in note
+    assert "본문 원문이 없어" in note
+    assert "공시 기준으로 표시합니다" in note
 
 
 def test_56_data_notes_empty_when_no_attachment():
@@ -74,7 +123,7 @@ def test_56_data_notes_empty_when_no_attachment():
 
 
 def test_56_data_notes_attachment_older_than_core_no_note():
-    """[첨부정정] 이 core 보다 오래된 공시면 data_notes 생성 안 함."""
+    """[첨부정정] 이 core 보다 접수 순서상 앞이면 data_notes 생성 안 함."""
     with store.connect() as conn:
         _upsert(conn, "99999999", "테스트", report_rcept_no="20261026000001")
         store.replace_sources(conn, "99999999", [
