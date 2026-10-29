@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { NavLink, Route, Routes } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { NavLink, Route, Routes, useLocation } from 'react-router-dom'
 import { api } from './api'
 import { CalendarPage } from './pages/CalendarPage'
 import { ListPage } from './pages/ListPage'
@@ -14,6 +14,9 @@ import { UpdateBanner } from './components/UpdateBanner'
 import { USE_MOCK } from './config'
 import { subscribeSlow } from './utils/wakeWatcher'
 
+// v1.9 (#41): 라우트 이동마다 /api/wake fire-and-forget — 짧은 간격 연속 이동 억제.
+const WAKE_ROUTE_THROTTLE_MS = 30_000
+
 export default function App() {
   const [waking, setWaking] = useState(false)
   useEffect(() => subscribeSlow(setWaking), [])
@@ -21,6 +24,23 @@ export default function App() {
   // 앱 진입 시 /api/health 를 한 번 호출해 Render 콜드스타트를 미리 깨운다.
   // 결과는 사용하지 않음(에러도 조용). 응답 지연은 wake 배너로 자동 노출.
   useEffect(() => { api.getHealth().catch(() => { /* noop */ }) }, [])
+
+  // v1.9 (#41): 라우트 이동마다 /api/wake 를 fire-and-forget 으로 호출.
+  //   - 목업 모드에서는 건너뜀(실 API 호출 없음 원칙).
+  //   - 30초 throttle 로 짧은 연속 이동 억제.
+  //   - 응답/오류/재시도/로그 모두 무시 — 서버가 깨어나는 신호만 던진다.
+  //   - #40 수집 버튼 wake(응답 기다림)와는 독립.
+  const location = useLocation()
+  const lastWakeRouteRef = useRef<number>(0)
+  useEffect(() => {
+    if (USE_MOCK) return
+    const now = Date.now()
+    if (now - lastWakeRouteRef.current < WAKE_ROUTE_THROTTLE_MS) return
+    lastWakeRouteRef.current = now
+    try {
+      void fetch('/api/wake', { method: 'GET', cache: 'no-store' }).catch(() => {})
+    } catch { /* ignore */ }
+  }, [location.pathname])
 
   return (
     <div className="app">

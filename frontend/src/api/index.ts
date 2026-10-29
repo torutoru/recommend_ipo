@@ -42,6 +42,9 @@ export const api = {
   async getCollectStatus() {
     return (await load()).getCollectStatus()
   },
+  async getWake() {
+    return (await load()).getWake()
+  },
   async postCollect(key: string | null) {
     return (await load()).postCollect(key)
   },

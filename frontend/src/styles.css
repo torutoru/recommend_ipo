@@ -361,7 +361,128 @@ table.checklist-table tbody tr.result-info   { background: var(--row-info); }
 .collect-btn:hover:not(:disabled) { background: var(--accent-hover); }
 .collect-btn:disabled { background: var(--surface); color: var(--fg-mute); cursor: progress; }
 .last-collected { color: var(--fg-mute); font-variant-numeric: tabular-nums; }
-.collect-summary { color: var(--pass); font-weight: 600; }
+.collect-summary {
+  color: var(--pass);
+  font-weight: 600;
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+/* v1.9 (#40): 요약 항목(신규/갱신/변화없음/실패) — 클릭 가능한 pill. */
+.collect-chip {
+  padding: 2px 8px;
+  background: transparent;
+  color: inherit;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.collect-chip:hover:not(:disabled) {
+  background: var(--accent-weak);
+  border-color: var(--border);
+}
+.collect-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.collect-chip:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+.collect-chip-static { cursor: default; }
+.collect-sep { color: var(--fg-mute); font-weight: 400; }
+
+/* v1.9 (#40): 수집 결과 다이얼로그 */
+.result-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  animation: result-dialog-backdrop-in 120ms ease-out;
+}
+.result-dialog {
+  background: var(--panel);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.5);
+  width: 100%;
+  max-width: 420px;
+  max-height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
+  animation: result-dialog-in 160ms ease-out;
+}
+@keyframes result-dialog-backdrop-in {
+  from { opacity: 0; } to { opacity: 1; }
+}
+@keyframes result-dialog-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .result-dialog-backdrop, .result-dialog { animation: none; }
+}
+.result-dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.result-dialog-head h3 {
+  margin: 0;
+  font-size: 15px;
+}
+.result-dialog-head h3 .muted { color: var(--fg-mute); font-weight: 400; font-size: 13px; margin-left: 4px; }
+.result-dialog-head button {
+  padding: 4px 10px;
+  background: transparent;
+  color: var(--fg-mute);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+.result-dialog-head button:hover { background: var(--accent-weak); color: var(--fg); }
+.result-dialog-empty {
+  margin: 0;
+  padding: 20px;
+  text-align: center;
+  color: var(--fg-mute);
+  font-size: 13px;
+}
+.result-dialog-list {
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.result-dialog-list li { border-bottom: 1px solid var(--border); }
+.result-dialog-list li:last-child { border-bottom: 0; }
+.result-dialog-list a {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  padding: 10px 14px;
+  color: var(--fg);
+  font-size: 13px;
+}
+.result-dialog-list a:hover { background: var(--accent-weak); text-decoration: none; }
+.result-dialog-name { font-weight: 600; min-width: 0; overflow-wrap: anywhere; word-break: break-all; }
+.result-dialog-code { color: var(--fg-mute); font-size: 11px; white-space: nowrap; }
 .collect-blocked, .collect-error { color: var(--pending); font-weight: 500; }
 .collect-error { color: var(--reject); }
 

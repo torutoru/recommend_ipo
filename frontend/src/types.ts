@@ -170,6 +170,19 @@ export interface CollectFailure {
   reason: string
 }
 
+// v1.9 (#40): 각 그룹의 회사 간단 정보. 결과 다이얼로그에서 상세 링크로 노출.
+export interface CollectCorpRef {
+  corp_code: string
+  corp_name: string
+}
+
+export interface CollectCorps {
+  new: CollectCorpRef[]
+  updated: CollectCorpRef[]
+  unchanged: CollectCorpRef[]
+  failed: CollectCorpRef[]
+}
+
 export interface CollectStatus {
   status: CollectState
   started_at: string | null
@@ -181,6 +194,8 @@ export interface CollectStatus {
   last_collected_at: string | null
   // v1.3: 실패 종목·사유. backend 미반영 응답은 필드가 없을 수 있어 optional.
   failures?: CollectFailure[]
+  // v1.9 (#40): 가장 최근 수집의 회사 그룹별 목록. backend 미반영 응답은 필드가 없을 수 있어 optional.
+  corps?: CollectCorps
 }
 
 // POST /api/collect 응답 분기.

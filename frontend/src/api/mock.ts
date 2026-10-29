@@ -1054,6 +1054,24 @@ function startMockCollect(): void {
         failures: [
           { corp_code: '00990001', corp_name: '(샘플) 나라AI', reason: '원문 파싱 실패 — 공모 금액 섹션을 찾을 수 없음' },
         ],
+        // v1.9 (#40) 샘플: 그룹별 회사 목록 (summary 숫자와 일치).
+        corps: {
+          new: [
+            { corp_code: '00111111', corp_name: '노브랜드컴퍼니' },
+            { corp_code: '00222222', corp_name: '미드스트림솔루션' },
+          ],
+          updated: [
+            { corp_code: '00333333', corp_name: '한양스마트메탈' },
+            { corp_code: '00444444', corp_name: '하이퀄리티인프라' },
+            { corp_code: '00555555', corp_name: '리커머스코퍼레이션' },
+          ],
+          unchanged: [
+            { corp_code: '00666666', corp_name: '뉴웨이브바이오' },
+          ],
+          failed: [
+            { corp_code: '00990001', corp_name: '(샘플) 나라AI' },
+          ],
+        },
       }
       if (collectTimer) { clearInterval(collectTimer); collectTimer = null }
     }
@@ -1118,6 +1136,11 @@ export async function postCollect(key: string | null): Promise<CollectStartResul
 
 export async function getHealth(): Promise<Health> {
   return delay({ status: 'ok', last_collected_at: collectState.last_collected_at })
+}
+
+// v1.9 (#40): wake 는 즉시 OK — 목업은 콜드스타트 없음.
+export async function getWake(): Promise<void> {
+  await delay(null, 120)
 }
 
 // --- v1.7 (#31): 「내 공모주」 — 메모리 저장 (목업) --------------------------

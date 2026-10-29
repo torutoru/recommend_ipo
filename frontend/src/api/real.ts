@@ -100,6 +100,12 @@ export async function getHealth(): Promise<Health> {
   return getJson(`/health`)
 }
 
+// v1.9 (#40): 서버 깨우기(수집 전 선호출). no-store, DB 접근 없음.
+// Render 콜드스타트 수십 초를 흡수. getJson 의 자동 재시도 budget(90s) 적용.
+export async function getWake(): Promise<void> {
+  await getJson<{ status: string }>(`/wake`)
+}
+
 export async function getCollectStatus(): Promise<CollectStatus> {
   return getJson(`/collect/status`)
 }
