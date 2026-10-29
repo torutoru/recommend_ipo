@@ -941,6 +941,85 @@ class TestRealCorpus:
         from app.parser import extract_tradable_ratio
         assert extract_tradable_ratio(_load_cached("20261021000239")) == 31.75
 
+    # ---- 지시 #58 (옵토닉스) ----
+    #    20261029000504 [발행조건확정] — "대표이사 등의 확인" 마커 없는 구조.
+    #    청약 기일 표(투자자 유형별 분리) + narrative "일반청약자 청약일: DATE ~ DATE".
+    #    "구주매출"·"신주모집" 라벨 없음 — "모집방법: 일반공모" 로만 표기.
+    def test_58_옵토닉스_subscription_retail_narrative(self):
+        from app.parser import extract_subscription_dates
+        s, e = extract_subscription_dates(_load_cached("20261029000504"))
+        assert s == "2026-11-05"
+        assert e == "2026-11-06"
+
+    def test_58_옵토닉스_offering_counts_inferred(self):
+        """신주/구주 명시 없음 → 모집방법 '일반공모' 기준 전량 신주 추정."""
+        from app.parser import extract_offering_counts
+        off = extract_offering_counts(_load_cached("20261029000504"))
+        assert off["total"] == 2_200_000
+        assert off["new"] == 2_200_000
+        assert off["old"] == 0
+        assert any("공모 구성 추정" in w for w in off["warnings"])
+
+
+def test_58_subscription_retail_narrative_synthetic():
+    """지시 #58: '일반청약자 청약일: DATE ~ DATE' narrative — 가장 자주 쓰는 형태."""
+    from app.parser import extract_subscription_dates
+    xml = (
+        "<p>(주5) 청약일 "
+        "- 우리사주조합 청약일: 2026년 11월 05일(목) (1일간) "
+        "- 기관투자자 청약일: 2026년 11월 05일(목) ~ 2026년 11월 06일(금) (2일간) "
+        "- 일반청약자 청약일: 2026년 11월 05일(목) ~ 2026년 11월 06일(금) (2일간)</p>"
+    )
+    s, e = extract_subscription_dates(xml)
+    assert s == "2026-11-05"
+    assert e == "2026-11-06"
+
+
+def test_58_subscription_retail_table_synthetic():
+    """지시 #58: 투자자 유형별 표 — '일반청약자 개시일 DATE 종료일 DATE'."""
+    from app.parser import extract_subscription_dates
+    xml = (
+        "<p>청약 기일 "
+        "우리사주조합 개시일 2026년 11월 05일(목) 종료일 2026년 11월 05일(목) "
+        "기관투자자 개시일 2026년 11월 05일(목) 종료일 2026년 11월 06일(금) "
+        "일반청약자 개시일 2026년 11월 05일(목) 종료일 2026년 11월 06일(금)</p>"
+    )
+    s, e = extract_subscription_dates(xml)
+    assert s == "2026-11-05"
+    assert e == "2026-11-06"
+
+
+def test_58_offering_counts_inferred_from_method_synthetic():
+    """지시 #58: 신주/구주 명시 없음 + '모집방법: 일반공모' → 전량 신주 추정 + warning."""
+    from app.parser import extract_offering_counts
+    xml = (
+        "<p>2. 모집 또는 매출 증권의 종류 : 기명식 보통주 2,200,000주 "
+        "모집(매출)주식수 2,200,000주 "
+        "나. 모집의 방법 등 [모집방법: 일반공모] 공모대상 주식수 "
+        "우리사주조합 77,510주 일반공모 2,122,490주 합계 2,200,000주</p>"
+    )
+    off = extract_offering_counts(xml)
+    assert off["total"] == 2_200_000
+    assert off["new"] == 2_200_000
+    assert off["old"] == 0
+    assert any("공모 구성 추정" in w for w in off["warnings"])
+
+
+def test_58_offering_counts_not_inferred_when_sale_method_present():
+    """지시 #58: '매출방법' 이 있으면 추정 안 함 — null 유지."""
+    from app.parser import extract_offering_counts
+    xml = (
+        "<p>모집(매출)주식수 2,200,000주 "
+        "모집방법: 일반공모 "
+        "매출방법: 구주매출</p>"
+    )
+    off = extract_offering_counts(xml)
+    # 추정 조건 위반 → warning 없고 new/old 는 null 유지 (total 만)
+    assert off["total"] == 2_200_000
+    assert off["new"] is None
+    assert off["old"] is None
+    assert not any("공모 구성 추정" in w for w in off["warnings"])
+
 
 def test_49_demand_result_label_with_footnote():
     """지시 #49 래블업 — 수요예측 결과 "경쟁률(주2)" 각주 표기 라벨 수용."""

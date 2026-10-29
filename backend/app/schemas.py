@@ -218,6 +218,24 @@ class CollectFailure(BaseModel):
     reason: str
 
 
+class CollectCorpEntry(BaseModel):
+    """v1.9 (지시 #59): 수집 결과 종목 단위 식별자."""
+    corp_code: str
+    corp_name: str
+
+
+class CollectCorps(BaseModel):
+    """v1.9 (지시 #59): 이번 수집 결과의 분기별 종목 목록. 히스토리 아님.
+
+    summary 숫자와 건수가 일치해야 한다 (new_count == len(new), 등).
+    failed 는 failures 와 같은 대상(동일 corp_code 집합).
+    """
+    new: list[CollectCorpEntry] = Field(default_factory=list)
+    updated: list[CollectCorpEntry] = Field(default_factory=list)
+    unchanged: list[CollectCorpEntry] = Field(default_factory=list)
+    failed: list[CollectCorpEntry] = Field(default_factory=list)
+
+
 class CollectStatus(BaseModel):
     status: CollectRunStatus
     started_at: Optional[str] = None
@@ -225,5 +243,6 @@ class CollectStatus(BaseModel):
     progress: Optional[CollectProgress] = None
     summary: Optional[CollectSummary] = None
     failures: list[CollectFailure] = Field(default_factory=list)  # v1.3 (지시 #22)
+    corps: Optional[CollectCorps] = None   # v1.9 (지시 #59): 이번 수집 분기별 종목 목록
     error: Optional[str] = None
     last_collected_at: Optional[str] = None

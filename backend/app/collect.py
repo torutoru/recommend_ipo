@@ -83,7 +83,8 @@ DART_URL = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo="
 #   v34 — 지시 #53 (증분 조회 2단계 — C001 신규 발견 + 전 유형은 existing corp 만 수용. v33 비IPO 유입 회귀 해소)
 #   v35 — 지시 #55 ([첨부정정] 공시 core 후보 제외 — document.xml 014 해소, 제논 재처리)
 #   v36 — 지시 #56 (sources.report_nm 추가 + IpoDetail.data_notes + 014 사유 문구)
-PARSER_VERSION = "v36"
+#   v37 — 지시 #58 (옵토닉스: 일반청약자 중심 청약일 파서 + 신주/구주 명시 없을 때 모집방법 기준 추정)
+PARSER_VERSION = "v37"
 
 
 # ---------- 분류 ----------

@@ -267,10 +267,30 @@ _RE_SUBSCRIPTION = re.compile(
 )
 
 
+_RE_SUBSCRIPTION_RETAIL_NARRATIVE = re.compile(
+    r"일반청약자[^0-9:]{0,30}청약일\s*[:：]?\s*"
+    r"(\d{4})\s*[-\.년]\s*(\d{1,2})\s*[-\.월]\s*(\d{1,2})\s*일?"
+    r"(?:\([^)]+\))?"
+    r"[^0-9~]{0,30}~[^0-9]{0,30}"
+    r"(?:(\d{4})\s*[-\.년]\s*)?(\d{1,2})\s*[-\.월]\s*(\d{1,2})"
+)
+_RE_SUBSCRIPTION_RETAIL_TABLE = re.compile(
+    r"일반청약자[^0-9]{0,30}개시일[^0-9]{0,20}"
+    r"(\d{4})\s*[-\.년]\s*(\d{1,2})\s*[-\.월]\s*(\d{1,2})\s*일?"
+    r"[^0-9]{0,120}?종료일[^0-9]{0,20}"
+    r"(?:(\d{4})\s*[-\.년]\s*)?(\d{1,2})\s*[-\.월]\s*(\d{1,2})"
+)
+
+
 def extract_subscription_dates(xml: str) -> tuple[Optional[str], Optional[str]]:
     # 지시 #39: 정정 신고서 "정 정 전" 섹션 제거 — 최신 일정만 매치.
     text = _extract_body_text(_strip_tags(xml))
-    m = _RE_SUBSCRIPTION.search(text)
+    # 지시 #58 (옵토닉스): 투자자 유형별 분리 표기 — 일반청약자 중심 패턴 우선.
+    m = None
+    for pat in (_RE_SUBSCRIPTION_RETAIL_NARRATIVE, _RE_SUBSCRIPTION_RETAIL_TABLE, _RE_SUBSCRIPTION):
+        m = pat.search(text)
+        if m:
+            break
     if not m:
         return None, None
     # 지시 #45 ②-8: 종료 연도 생략 허용 (group(4) 가 None 이면 시작 연도 재사용).
@@ -695,6 +715,15 @@ _RE_OLD_SHARES = re.compile(
 _RE_NO_OLD_SHARES = re.compile(
     r"구주\s*매출\s*(?:없이|없음|해당\s*(?:사항)?\s*없)"
 )
+# 지시 #58 (옵토닉스): 신주/구주 명시 없음·총 공모만 확정인 경우를 위한 2차 신호.
+# "모집방법: 일반공모" / "모집(매출)방법 ... 일반공모" 는 있고 "매출방법"·"구주매출" 가 전혀 없으면
+# 전량 모집(신주) 로 간주. 추정이므로 사용자 안내(data_notes) 를 함께 생성.
+_RE_SUBSCRIPTION_METHOD_ONLY = re.compile(
+    r"모집(?:\(매출\))?\s*방법[^가-힣]{0,20}(?:[:：][^가-힣]{0,10})?일반공모"
+)
+_RE_SALE_METHOD = re.compile(r"매출\s*방법")
+# data_notes 생성용 sentinel (repository._data_notes_from_row 가 감지).
+_INFERRED_SHARES_WARNING = "공모 구성 추정 — 모집방법 '일반공모' 기준 전량 신주 처리"
 # 라벨 바로 뒤의 선언형 숫자만 매치. 설명문 안 "공모주식수는..." 같은 조사형은 lookahead 로 차단.
 # 다비오("모집 또는 매출주식의 수" / "기명식 보통주 1,000,000주") 패턴도 추가.
 _RE_TOTAL_OFFERING = re.compile(
@@ -757,6 +786,20 @@ def extract_offering_counts(xml: str) -> dict:
         if old is not None and old != 0:
             warnings.append(f"구주매출 없음 명시 — regex old({old}) 폐기 → 0")
         old = 0
+
+    # 지시 #58 (옵토닉스): 신주/구주 명시 없음 + "모집방법: 일반공모" + "매출방법"/"구주매출" 부재
+    # → 전량 신주 추정. 추정이므로 data_notes 를 통해 사용자에게 안내.
+    if (
+        new is None
+        and old is None
+        and total is not None and total > 0
+        and _RE_SUBSCRIPTION_METHOD_ONLY.search(text)
+        and not _RE_SALE_METHOD.search(text)
+        and "구주매출" not in text
+    ):
+        new = total
+        old = 0
+        warnings.append(_INFERRED_SHARES_WARNING)
 
     # 보완: new+old 가 있고 total 없으면 합산, 반대도 가능
     if total is None and new is not None and old is not None:

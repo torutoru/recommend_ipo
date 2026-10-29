@@ -153,3 +153,32 @@ def test_56_dart_client_recognizes_014_as_file_missing():
     src = inspect.getsource(dart_client.download_document_zip)
     assert "DART 014 파일 없음" in src
     assert "014" in src
+
+
+# ---- 지시 #58 (옵토닉스) — 신주/구주 명시 없을 때 추정 안내 ----
+
+def test_58_data_notes_offering_structure_inferred():
+    """parser 가 공모 구성 추정 warning 을 기록하면 data_notes 에 안내 1건."""
+    row = {
+        "sources": [],
+        "report_rcept_no": "20261029000504",
+        "warnings": ["공모 구성 추정 — 모집방법 '일반공모' 기준 전량 신주 처리"],
+    }
+    notes = _data_notes_from_row(row)
+    assert len(notes) == 1
+    note = notes[0]
+    assert "신주" in note and "구주" in note
+    assert "일반공모" in note
+    # 비밀값/URL 없음
+    assert "https://" not in note
+
+
+def test_58_data_notes_no_inference_note_when_no_warning():
+    row = {"sources": [], "report_rcept_no": "X", "warnings": []}
+    assert _data_notes_from_row(row) == []
+
+
+def test_58_data_notes_handles_missing_warnings_key():
+    """row 에 'warnings' 키가 없어도 KeyError 없이 통과."""
+    row = {"sources": [], "report_rcept_no": "X"}
+    assert _data_notes_from_row(row) == []

@@ -90,31 +90,38 @@ def _data_notes_from_row(row: dict) -> list[str]:
     notes: list[str] = []
     sources = row.get("sources") or []
     core_rcept = row.get("report_rcept_no")
-    if not sources or not core_rcept:
-        return notes
 
-    # core 공시 메타 — rcept_dt / report_nm
-    core_rcept_dt: Optional[str] = None
-    core_report_nm: str = ""
-    for s in sources:
-        if s.get("rcept_no") == core_rcept:
-            core_rcept_dt = s.get("rcept_dt")
-            core_report_nm = s.get("report_nm") or ""
-            break
+    # [첨부정정] 안내 — core_rcept 와 sources 있을 때만 (지시 #56·#57)
+    if sources and core_rcept:
+        core_rcept_dt: Optional[str] = None
+        core_report_nm: str = ""
+        for s in sources:
+            if s.get("rcept_no") == core_rcept:
+                core_rcept_dt = s.get("rcept_dt")
+                core_report_nm = s.get("report_nm") or ""
+                break
+        core_label = _core_prefix_label(core_report_nm)
+        for s in sources:
+            report_nm = s.get("report_nm") or ""
+            rcept_no = s.get("rcept_no") or ""
+            rcept_dt = s.get("rcept_dt") or ""
+            if "[첨부정정]" not in report_nm:
+                continue
+            if rcept_no > core_rcept:
+                notes.append(
+                    f"{_format_date_korean(rcept_dt)} [첨부정정] 증권신고서는 본문 원문이 없어 "
+                    f"{_format_date_korean(core_rcept_dt)} {core_label} 공시 기준으로 표시합니다."
+                )
+                break
 
-    core_label = _core_prefix_label(core_report_nm)
-
-    # [첨부정정] 중 core 보다 **접수 순서상 뒤** (rcept_no 비교) 공시 수집
-    for s in sources:
-        report_nm = s.get("report_nm") or ""
-        rcept_no = s.get("rcept_no") or ""
-        rcept_dt = s.get("rcept_dt") or ""
-        if "[첨부정정]" not in report_nm:
-            continue
-        if rcept_no > core_rcept:
+    # 지시 #58: 신주/구주 명시 없음 → 모집방법 기준 전량 신주 추정 안내.
+    # parser.py 가 `_INFERRED_SHARES_WARNING` sentinel 로 신호. warnings 는 store 가 row 에 채움.
+    # sources 유무와 무관하게 동작 — warnings 만 있으면 안내 생성.
+    for w in (row.get("warnings") or []):
+        if "공모 구성 추정" in w and "일반공모" in w:
             notes.append(
-                f"{_format_date_korean(rcept_dt)} [첨부정정] 증권신고서는 본문 원문이 없어 "
-                f"{_format_date_korean(core_rcept_dt)} {core_label} 공시 기준으로 표시합니다."
+                "신주·구주 구성이 본문에 명시되지 않아 '모집방법: 일반공모' 서술에 따라 "
+                "전량 신주로 처리했습니다."
             )
             break
 

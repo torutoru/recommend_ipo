@@ -1619,3 +1619,76 @@ def test_persistence_check_failed_marks_failed(client, monkeypatch):
     s = _wait_done(client)
     assert s["status"] == "FAILED"
     assert "쓰기 검증" in s["error"]
+
+
+# ---- 지시 #59 (api-contract v1.9) — /api/wake + CollectStatus.corps ----
+
+def test_59_wake_returns_ok_with_no_store(client):
+    """/api/wake — 200 {"status":"ok"} + Cache-Control: no-store, DB·외부 호출 없음."""
+    r = client.get("/api/wake")
+    assert r.status_code == 200
+    assert r.json() == {"status": "ok"}
+    assert r.headers.get("cache-control") == "no-store"
+
+
+def test_59_wake_available_on_sample_mode(sample_client):
+    """샘플 모드에서도 wake 는 응답 — 수집 기능과 무관."""
+    r = sample_client.get("/api/wake")
+    assert r.status_code == 200
+    assert r.json() == {"status": "ok"}
+
+
+def test_59_corps_empty_on_idle(client):
+    """수집 전(IDLE) status 응답: corps 는 None."""
+    r = client.get("/api/collect/status")
+    assert r.status_code == 200
+    assert r.json().get("corps") is None
+
+
+def test_59_corps_counts_match_summary_new(client, monkeypatch):
+    """새 종목 1개 수집 → corps.new 1건, corps 각 분기 건수 = summary 카운트."""
+    items = [_disc("20261012000308", "[발행조건확정]증권신고서(지분증권)",
+                   "00534729", "디티에스")]
+    _mock_dart(monkeypatch, list_items=items)
+    client.post("/api/collect")
+    s = _wait_done(client)
+    assert s["status"] == "SUCCEEDED"
+    corps = s["corps"]
+    assert corps is not None
+    assert len(corps["new"]) == s["summary"]["new_count"]
+    assert len(corps["updated"]) == s["summary"]["updated_count"]
+    assert len(corps["unchanged"]) == s["summary"]["unchanged_count"]
+    assert len(corps["failed"]) == s["summary"]["failed_count"]
+    assert any(c["corp_code"] == "00534729" and c["corp_name"] == "디티에스"
+               for c in corps["new"])
+
+
+def test_59_corps_counts_match_summary_unchanged(client, monkeypatch):
+    """2회차 수집 → corps.unchanged 1건, summary.unchanged_count 와 일치."""
+    items = [_disc("20261012000308", "[발행조건확정]증권신고서(지분증권)",
+                   "00534729", "디티에스")]
+    _mock_dart(monkeypatch, list_items=items)
+    client.post("/api/collect")
+    _wait_done(client)
+    client.post("/api/collect")
+    s = _wait_done(client)
+    corps = s["corps"]
+    assert len(corps["unchanged"]) == s["summary"]["unchanged_count"] == 1
+    assert len(corps["new"]) == s["summary"]["new_count"] == 0
+    assert any(c["corp_code"] == "00534729" for c in corps["unchanged"])
+
+
+def test_59_corps_failed_matches_failures_set(client, monkeypatch):
+    """실패 종목이 corps.failed 와 failures 양쪽에 동일한 corp_code 로 등장."""
+    items = [_disc("20261012000308", "[발행조건확정]증권신고서(지분증권)",
+                   "00534729", "디티에스")]
+    _mock_dart(monkeypatch, list_items=items)
+    monkeypatch.setattr(dart_client, "download_document_zip",
+                        lambda **kw: b"not a zip")
+    client.post("/api/collect")
+    s = _wait_done(client)
+    failure_codes = {f["corp_code"] for f in s["failures"]}
+    corps = s["corps"]
+    corps_failed_codes = {c["corp_code"] for c in corps["failed"]}
+    assert failure_codes == corps_failed_codes
+    assert len(corps["failed"]) == s["summary"]["failed_count"]

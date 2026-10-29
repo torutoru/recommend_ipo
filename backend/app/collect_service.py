@@ -19,7 +19,14 @@ from . import collect as collect_mod
 from . import dart_client, store
 from .config import get_settings
 from .parser import parse
-from .schemas import CollectFailure, CollectProgress, CollectStatus, CollectSummary
+from .schemas import (
+    CollectCorpEntry,
+    CollectCorps,
+    CollectFailure,
+    CollectProgress,
+    CollectStatus,
+    CollectSummary,
+)
 from .time_utils import KST, kst_days_ago, now_iso_kst, now_kst
 
 
@@ -30,6 +37,7 @@ _state: dict = {
     "finished_at": None,
     "progress": None,
     "summary": None,
+    "corps": None,   # v1.9 (지시 #59): 가장 최근 수집의 분기별 종목 목록
     "error": None,
 }
 _state_lock = threading.Lock()
@@ -45,6 +53,7 @@ def current_status() -> CollectStatus:
         progress=s["progress"],
         summary=s["summary"],
         failures=s.get("failures") or [],
+        corps=s.get("corps"),   # v1.9 (지시 #59)
         error=s["error"],
         last_collected_at=store.last_collected_at(),
     )
@@ -72,6 +81,7 @@ def try_start() -> tuple[bool, CollectStatus]:
         progress=CollectProgress(done=0, total=None),
         summary=CollectSummary(),
         failures=[],
+        corps=CollectCorps(),   # v1.9 (지시 #59): 이번 수집 분기별 목록 초기화
         error=None,
     )
     thread = threading.Thread(target=_run_safely, name="collect-worker", daemon=True)
@@ -223,11 +233,18 @@ def _run() -> None:
 
     summary = CollectSummary()
     failures: list[CollectFailure] = []
+    corps = CollectCorps()   # v1.9 (지시 #59)
     done = 0
 
     def _add_failure(corp_code: str, corp_name: str, reason: str) -> None:
         reason = _sanitize_error_text(reason)
         failures.append(CollectFailure(corp_code=corp_code, corp_name=corp_name, reason=reason))
+        corps.failed.append(CollectCorpEntry(corp_code=corp_code, corp_name=corp_name))
+
+    def _add_corp(bucket: str, corp_code: str, corp_name: str) -> None:
+        """v1.9 (지시 #59): corps.{new,updated,unchanged} 에 기록. failed 는 _add_failure 전용."""
+        entry = CollectCorpEntry(corp_code=corp_code, corp_name=corp_name)
+        getattr(corps, bucket).append(entry)
 
     for corp_code, items in grouped.items():
         corp_name = items[-1].get("corp_name", corp_code)
@@ -240,6 +257,7 @@ def _run() -> None:
                 if is_existing:
                     summary.unchanged_count += 1
                     summary.unchanged_corps.append(f"{corp_name}({corp_code})")
+                    _add_corp("unchanged", corp_code, corp_name)
                 continue
             # is_stale 이면 new_items 가 비어도 process_corp 로 재파싱 진행 (버전 bump 시 자동 재적용)
 
@@ -293,10 +311,13 @@ def _run() -> None:
                 # 지시 #37: preserved 사유 포함 — 다음 라운드 특정 쉬움
                 _reason = (r.get("reason") or "").replace(" ", "-")[:40] or "no-core"
                 summary.unchanged_corps.append(f"{corp_name}({corp_code}) preserved:{_reason}")
+                _add_corp("unchanged", corp_code, corp_name)
             elif is_new:
                 summary.new_count += 1
+                _add_corp("new", corp_code, corp_name)
             else:
                 summary.updated_count += 1
+                _add_corp("updated", corp_code, corp_name)
         except Exception as e:  # 종목 단위 오류 격리
             summary.failed_count += 1
             _add_failure(corp_code, corp_name, _sanitize_error(e))
@@ -304,7 +325,7 @@ def _run() -> None:
             # continue/정상/예외 모두 여기 한 번만 가산
             done += len(items)
             _set(progress=CollectProgress(done=done, total=total_disclosures),
-                 summary=summary, failures=failures)
+                 summary=summary, failures=failures, corps=corps)
 
     # 지시 #28: 증분 조회에 안 잡혔지만 DB 에 있고 parser_version 이 낡은 종목도 재처리.
     # (다비오/유캐스트처럼 최근 공시 없는 종목이 stale 로 남으면 CORRECTION/지표 갱신이 안 됨)
@@ -331,6 +352,7 @@ def _run() -> None:
                 # 조회됐으나 분류 가능한 공시가 없음 — unchanged 로 계수
                 summary.unchanged_count += 1
                 summary.unchanged_corps.append(f"{corp_name}({corp_code}) stale-only:no-filtered")
+                _add_corp("unchanged", corp_code, corp_name)
                 continue
             items_for_process = sorted(filtered_full, key=lambda d: d.get("rcept_dt", ""))
             if items_for_process:
@@ -356,14 +378,16 @@ def _run() -> None:
                 summary.unchanged_corps.append(
                     f"{corp_name}({corp_code}) stale-only:preserved:{_reason}"
                 )
+                _add_corp("unchanged", corp_code, corp_name)
             else:
                 summary.updated_count += 1
+                _add_corp("updated", corp_code, corp_name)
         except Exception as e:
             summary.failed_count += 1
             _add_failure(corp_code, corp_name, _sanitize_error(e))
         finally:
             _set(progress=CollectProgress(done=done, total=total_disclosures),
-                 summary=summary, failures=failures)
+                 summary=summary, failures=failures, corps=corps)
 
     # 완료
     with store.connect() as conn:
@@ -432,6 +456,9 @@ def _reset_for_tests() -> None:
             "finished_at": None,
             "progress": None,
             "summary": None,
+            "corps": None,   # v1.9 (지시 #59)
             "error": None,
         })
+        # 테스트 간 failures 가 남아 다음 테스트에서 보이는 문제 방지 (현재는 failures 미기록)
+        _state.pop("failures", None)
     _lock = threading.Lock()

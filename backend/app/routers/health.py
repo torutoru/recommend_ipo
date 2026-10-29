@@ -1,6 +1,7 @@
 import os
 
 from fastapi import APIRouter
+from fastapi.responses import JSONResponse
 
 from .. import repository
 from ..collect import PARSER_VERSION
@@ -26,4 +27,16 @@ def health() -> HealthResponse:
         last_collected_at=repository.last_collected_at(),
         parser_version=PARSER_VERSION,
         commit=_resolve_commit(),
+    )
+
+
+@router.get("/wake")
+def wake() -> JSONResponse:
+    """지시 #59 (api-contract v1.9): Render Free 슬립 깨우기 전용 — DB/외부 호출 없이 즉시 응답.
+
+    `Cache-Control: no-store` 로 Netlify/브라우저 캐시 금지(매번 Render 를 깨워야 함).
+    """
+    return JSONResponse(
+        content={"status": "ok"},
+        headers={"Cache-Control": "no-store"},
     )
