@@ -396,7 +396,7 @@ table.checklist-table tbody tr.result-info   { background: var(--row-info); }
 .collect-chip-static { cursor: default; }
 .collect-sep { color: var(--fg-mute); font-weight: 400; }
 
-/* v1.9 (#40): 수집 결과 다이얼로그 */
+/* v1.9 (#40·#43): 수집 결과 다이얼로그 — 배경 스크롤 잠금 + 목록만 스크롤 */
 .result-dialog-backdrop {
   position: fixed;
   inset: 0;
@@ -407,6 +407,9 @@ table.checklist-table tbody tr.result-info   { background: var(--row-info); }
   justify-content: center;
   padding: 16px;
   animation: result-dialog-backdrop-in 120ms ease-out;
+  /* v1.9 (#43): backdrop 위 터치 스크롤이 뒤 페이지로 전달되지 않게. */
+  overscroll-behavior: contain;
+  touch-action: none;
 }
 .result-dialog {
   background: var(--panel);
@@ -468,6 +471,11 @@ table.checklist-table tbody tr.result-info   { background: var(--row-info); }
   overflow-y: auto;
   flex: 1 1 auto;
   min-height: 0;
+  /* v1.9 (#43): 목록 안에서 스크롤 — 끝에 도달해도 배경으로 전달 안 됨. */
+  max-height: 60vh;
+  overscroll-behavior: contain;
+  /* 수직 스크롤만, 수평 핀치/스크롤은 다이얼로그 안에서. */
+  touch-action: pan-y;
 }
 .result-dialog-list li { border-bottom: 1px solid var(--border); }
 .result-dialog-list li:last-child { border-bottom: 0; }

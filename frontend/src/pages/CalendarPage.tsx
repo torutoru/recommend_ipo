@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { api } from '../api'
 import { holdings } from '../api/holdings'
 // v1.10 (#30): 로컬 미리보기 — prod 에서는 `import.meta.env.DEV` 로 데드 코드 처리.
@@ -11,11 +11,16 @@ import {
   addMonths,
   enumerateDaysInclusive,
   firstDayOfMonth,
+  fmtMonth,
   lastDayOfMonth,
   monthGrid,
   monthLabel,
+  parseMonth,
 } from '../utils/calendar'
 import { marketLabel } from '../utils/format'
+
+// v1.9 (#42): 상세 → 달력으로 돌아갈 때 "보던 달" 복원. sessionStorage 보조 키.
+const LAST_MONTH_SS_KEY = 'cal:lastMonth'
 
 type EventType = 'SUBSCRIPTION' | 'LISTING'
 interface CalEvent {
@@ -95,10 +100,42 @@ function priorityOf(ev: CalEvent): number {
 }
 
 export function CalendarPage() {
+  // v1.9 (#42): URL ?month=YYYY-MM 과 cursor 를 양방향 동기화.
+  //   초기 cursor 우선순위: URL 쿼리 → sessionStorage → 이번 달.
+  //   잘못된 쿼리/저장값은 이번 달로 폴백.
+  const [searchParams, setSearchParams] = useSearchParams()
   const [cursor, setCursor] = useState<Date>(() => {
+    const fromUrl = parseMonth(searchParams.get('month'))
+    if (fromUrl) return fromUrl
+    try {
+      const fromSs = parseMonth(sessionStorage.getItem(LAST_MONTH_SS_KEY))
+      if (fromSs) return fromSs
+    } catch { /* storage 접근 거부 — 폴백 */ }
     const now = new Date()
     return new Date(now.getFullYear(), now.getMonth(), 1)
   })
+
+  // cursor → URL ?month + sessionStorage. 월 네비는 히스토리를 쌓지 않도록 replace.
+  useEffect(() => {
+    const ym = fmtMonth(cursor)
+    if (searchParams.get('month') !== ym) {
+      const next = new URLSearchParams(searchParams)
+      next.set('month', ym)
+      setSearchParams(next, { replace: true })
+    }
+    try { sessionStorage.setItem(LAST_MONTH_SS_KEY, ym) } catch { /* ignore */ }
+  }, [cursor, searchParams, setSearchParams])
+
+  // URL ?month 가 외부에서(뒤로 가기 등) 바뀌면 cursor 에 반영.
+  useEffect(() => {
+    const fromUrl = parseMonth(searchParams.get('month'))
+    if (!fromUrl) return
+    if (fmtMonth(fromUrl) !== fmtMonth(cursor)) {
+      setCursor(fromUrl)
+    }
+    // cursor 는 effect 안에서 비교만 — deps 에 넣으면 루프.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
   const [passOnly, setPassOnly] = useState(false)
   const [items, setItems] = useState<IpoSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)

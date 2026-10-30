@@ -31,6 +31,30 @@ export function CollectResultDialog({ title, items, onClose }: Props) {
     closeBtnRef.current?.focus()
   }, [])
 
+  // v1.9 (#43): 열려 있는 동안 배경 스크롤 잠금. iOS 호환을 위해 body position:fixed + 스크롤 보존.
+  //   닫을 때 원래 스크롤 위치로 복원.
+  useEffect(() => {
+    const scrollY = window.scrollY
+    const body = document.body
+    const prev = {
+      overflow: body.style.overflow,
+      position: body.style.position,
+      top: body.style.top,
+      width: body.style.width,
+    }
+    body.style.overflow = 'hidden'
+    body.style.position = 'fixed'
+    body.style.top = `-${scrollY}px`
+    body.style.width = '100%'
+    return () => {
+      body.style.overflow = prev.overflow
+      body.style.position = prev.position
+      body.style.top = prev.top
+      body.style.width = prev.width
+      window.scrollTo(0, scrollY)
+    }
+  }, [])
+
   function onBackdropClick(e: React.MouseEvent) {
     if (e.target === e.currentTarget) onClose()
   }

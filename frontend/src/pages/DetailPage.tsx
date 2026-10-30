@@ -29,7 +29,18 @@ import {
   NULL_PLACEHOLDER,
   pricePositionLabel,
 } from '../utils/format'
-import { toYmd } from '../utils/calendar'
+import { parseMonth, toYmd } from '../utils/calendar'
+
+// v1.9 (#42): 「← 달력으로」 는 sessionStorage 의 마지막 보던 달을 쿼리로 보존.
+//   저장 안 돼 있거나 잘못됐으면 그냥 `/` (이번 달).
+function calendarBackHref(): string {
+  try {
+    const raw = sessionStorage.getItem('cal:lastMonth')
+    const parsed = parseMonth(raw)
+    if (parsed) return `/?month=${raw}`
+  } catch { /* storage 접근 거부 — fallback */ }
+  return '/'
+}
 
 // v1.6 (#24): 공모가 위치 카드의 짧은 기준 힌트.
 const PRICE_HINT = '최상단 초과 시 25점'
@@ -136,8 +147,9 @@ export function DetailPage() {
   return (
     <section className="page page-detail">
       <div className="back-link">
-        {/* v1.6 (#26-7): `/` 는 달력이므로 라벨도 "달력으로" 로 교정. */}
-        <Link to="/">← 달력으로</Link>
+        {/* v1.6 (#26-7): `/` 는 달력이므로 라벨도 "달력으로" 로 교정.
+            v1.9 (#42): sessionStorage 의 마지막 보던 달이 있으면 거기로 복귀. */}
+        <Link to={calendarBackHref()}>← 달력으로</Link>
       </div>
 
       <header className="detail-head">
